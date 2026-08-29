@@ -36,6 +36,10 @@ class RunRequest(BaseModel):
     code: str
 
 
+class SolutionViewedRequest(BaseModel):
+    lessonId: str
+
+
 def scaffold_hint(solution: str) -> str:
     """Turn a complete answer into a syntax-preserving, fill-in-the-blank hint."""
     strings = r'(?:[fFrRbBuU]{0,2})?(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'
@@ -132,6 +136,25 @@ def record_attempt(lesson_id: str, code: str, output: str, correct: bool, hint_l
             (lesson_id, next_review_at, next_stage, streak, "correct" if correct else "incorrect"),
         )
     return next_review_at
+
+
+def record_solution_view(lesson_id: str) -> str:
+    """Schedule a quick retry after a learner checks the full solution."""
+    next_review_at = (date.today() + timedelta(days=1)).isoformat()
+    with database() as connection:
+        connection.execute(
+            """INSERT INTO lesson_progress
+            (lesson_id, next_review_at, review_stage, consecutive_without_hint, last_result)
+            VALUES (?, ?, 0, 0, 'solution_viewed')
+            ON CONFLICT(lesson_id) DO UPDATE SET
+                next_review_at = excluded.next_review_at,
+                review_stage = 0,
+                consecutive_without_hint = 0,
+                last_result = excluded.last_result,
+                updated_at = CURRENT_TIMESTAMP""",
+            (lesson_id, next_review_at),
+        )
+    return next_review_at
 def create_today_plan() -> None:
     today = date.today().isoformat()
     with database() as connection:
@@ -193,17 +216,18 @@ def mistake_lessons() -> list[dict]:
             FROM attempts WHERE correct = 0 ORDER BY created_at DESC, id DESC"""
         ).fetchall()
         progress_rows = connection.execute(
-            "SELECT lesson_id, next_review_at, consecutive_without_hint FROM lesson_progress"
+            "SELECT lesson_id, next_review_at, consecutive_without_hint, last_result FROM lesson_progress"
         ).fetchall()
     progress_by_lesson = {
-        lesson_id: {"nextReview": next_review_at, "streak": streak}
-        for lesson_id, next_review_at, streak in progress_rows
+        lesson_id: {"nextReview": next_review_at, "streak": streak, "lastResult": last_result}
+        for lesson_id, next_review_at, streak, last_result in progress_rows
     }
     lesson_by_id = {lesson["id"]: lesson for lesson in LESSONS}
     latest_attempts: dict[str, tuple] = {}
     for attempt in attempts:
         latest_attempts.setdefault(attempt[0], attempt)
     mistakes = []
+    included_lesson_ids: set[str] = set()
     for lesson_id, (_, code, output, hint_level, created_at) in latest_attempts.items():
         lesson = lesson_by_id.get(lesson_id)
         state = progress_by_lesson.get(lesson_id)
@@ -221,6 +245,26 @@ def mistake_lessons() -> list[dict]:
             "hintLevel": hint_level,
             "nextReview": state["nextReview"],
             "lastAttemptAt": created_at,
+        })
+        included_lesson_ids.add(lesson_id)
+    for lesson_id, state in progress_by_lesson.items():
+        if state["lastResult"] != "solution_viewed" or lesson_id in included_lesson_ids:
+            continue
+        lesson = lesson_by_id.get(lesson_id)
+        if not lesson:
+            continue
+        mistakes.append({
+            "lessonId": lesson_id,
+            "title": lesson["title"],
+            "unit": lesson.get("unit", "복습"),
+            "prompt": lesson["prompt"],
+            "concept": lesson["concept"],
+            "code": "",
+            "output": "",
+            "expectedOutput": lesson["expectedOutput"],
+            "hintLevel": 0,
+            "nextReview": state["nextReview"],
+            "lastAttemptAt": "해설 확인",
         })
     return mistakes
 def run_safe_code(code: str, inputs: list[str]) -> str:
@@ -280,6 +324,22 @@ def mistakes() -> dict[str, list[dict]]:
 @app.get("/api/today")
 def today() -> dict[str, object]:
     return today_session()
+
+
+@app.post("/api/solution-viewed")
+def solution_viewed(request: SolutionViewedRequest) -> dict[str, object]:
+    lesson = next((item for item in LESSONS if item["id"] == request.lessonId), None)
+    if not lesson:
+        return {"success": False, "message": "레슨 정보를 찾지 못했어요."}
+    next_review = record_solution_view(lesson["id"])
+    return {
+        "success": True,
+        "nextReview": next_review,
+        "message": "해설을 확인한 문제는 내일 다시 풀 수 있도록 복습에 등록했어요.",
+        "dueLessons": due_lessons(),
+        "mistakes": mistake_lessons(),
+        "todaySession": today_session(),
+    }
 
 
 @app.post("/api/run")
