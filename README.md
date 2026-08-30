@@ -21,6 +21,21 @@ npm run dev
 
 브라우저에서 `http://localhost:5173`을 엽니다.
 
+## 모바일 배포 (Vercel + Render + Supabase)
+
+학습 기록은 모바일과 PC에서 이어져야 하므로, 배포 환경에서는 SQLite 대신 PostgreSQL을 사용합니다. 로컬에서는 별도 설정 없이 기존 SQLite가 계속 동작합니다.
+
+1. **Supabase**에서 프로젝트를 만든 뒤, `Connect` 화면의 **Session pooler** 연결 문자열을 복사합니다. 이 값은 비밀번호를 포함하므로 GitHub에 올리지 않습니다.
+2. **Render**에서 `New → Web Service`를 선택해 이 저장소를 연결합니다. `Root Directory`는 `backend`, Build Command는 `pip install -r requirements.txt`, Start Command는 `uvicorn app.main:app --host 0.0.0.0 --port $PORT`입니다. `render.yaml`을 사용해 Blueprint로 만들어도 됩니다.
+3. Render의 Environment Variables에 아래 값을 추가합니다.
+   - `DATABASE_URL`: Supabase Session pooler 연결 문자열
+   - `CORS_ORIGINS`: Vercel 배포 주소 (예: `https://your-project.vercel.app`)
+4. Render의 `/api/health` 주소가 `{"status":"ok"}`를 반환하는지 확인합니다.
+5. **Vercel** 프로젝트의 Root Directory를 `frontend`로 설정하고, Environment Variables에 `VITE_API_URL`을 Render 기본 주소로 추가합니다. 예: `https://your-pycoach-api.onrender.com` — 끝에 `/api`를 붙이지 않습니다.
+6. Vercel을 재배포한 뒤 모바일에서 학습·실행·채점이 모두 동작하는지 확인합니다.
+
+`frontend/.env.example`, `backend/.env.example`은 설정 이름 예시만 담고 있으며 실제 비밀번호는 넣지 않습니다.
+
 ## 현재 MVP
 
 - 레벨 1 개념 카드 3개

@@ -10,7 +10,8 @@ type RunResult = { success:boolean; output:string; error:string }
 type SolutionViewResponse = { success:boolean; message:string; nextReview?:string; dueLessons?:Lesson[]; mistakes?:Mistake[]; todaySession?:Today }
 type Page = 'today'|'studio'|'mistakes'|'kaggle'
 
-const API='/api'
+// Local Vite uses its proxy. In Vercel, VITE_API_URL points at the Render API origin.
+const API=(import.meta.env.VITE_API_URL??'/api').replace(/\/$/,'')
 const fallback:Lesson[]=[{id:'hello-print',order:1,level:1,unit:'출력',title:'화면에 글자 보여주기',concept:'print()는 컴퓨터에게 내용을 화면에 보여 달라고 하는 명령입니다.',why:'코드를 실행한 결과를 확인하는 가장 첫 도구예요.',example:'print("안녕하세요")',exampleOutput:'안녕하세요',prompt:'화면에 “안녕하세요”를 출력해 보세요.',starterCode:'# 여기에 코드를 작성해 보세요\n',expectedOutput:'안녕하세요',hints:['화면에 내용을 보여줄 때 쓰는 함수를 떠올려 보세요.','글자는 따옴표로 감쌉니다.','print(________)'],summary:'print()는 값을 화면에 출력합니다.',estimatedMinutes:7}]
 const levelOf=(lesson:Lesson)=>lesson.level??(lesson.order<=15?1:lesson.order<=21?2:lesson.order<=27?3:lesson.order<=33?4:5)
 const levelName=(level:number)=>['','파이썬 첫걸음','조건문으로 판단하기','반복으로 데이터 다루기','자료구조로 데이터 묶기','함수로 분석 로직 만들기'][level]??`레벨 ${level}`
