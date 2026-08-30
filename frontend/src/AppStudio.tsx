@@ -15,6 +15,30 @@ const API=(import.meta.env.VITE_API_URL??'/api').replace(/\/$/,'')
 const fallback:Lesson[]=[{id:'hello-print',order:1,level:1,unit:'출력',title:'화면에 글자 보여주기',concept:'print()는 컴퓨터에게 내용을 화면에 보여 달라고 하는 명령입니다.',why:'코드를 실행한 결과를 확인하는 가장 첫 도구예요.',example:'print("안녕하세요")',exampleOutput:'안녕하세요',prompt:'화면에 “안녕하세요”를 출력해 보세요.',starterCode:'# 여기에 코드를 작성해 보세요\n',expectedOutput:'안녕하세요',hints:['화면에 내용을 보여줄 때 쓰는 함수를 떠올려 보세요.','글자는 따옴표로 감쌉니다.','print(________)'],summary:'print()는 값을 화면에 출력합니다.',estimatedMinutes:7}]
 const levelOf=(lesson:Lesson)=>lesson.level??(lesson.order<=15?1:lesson.order<=21?2:lesson.order<=27?3:lesson.order<=33?4:5)
 const levelName=(level:number)=>['','파이썬 첫걸음','조건문으로 판단하기','반복으로 데이터 다루기','자료구조로 데이터 묶기','함수로 분석 로직 만들기'][level]??`레벨 ${level}`
+const conceptSteps=(lesson:Lesson)=>{
+  const missionSteps:Record<string,string[]>={
+    'profile-mission':['입력으로 받은 이름과 직접 정할 과목을 서로 다른 변수로 구분합니다.','두 변수의 값을 한 문장에 넣되, 문장 속 고정 문구·공백·조사는 따로 둡니다.','문장을 만들기 전에 최종 출력 문장을 말로 먼저 읽어 봅니다.'],
+    'shopping-mission':['가격과 수량은 계산할 숫자이므로 입력 직후 숫자로 바꿉니다.','두 값의 관계를 곱셈식으로 만들고, 그 결과만 출력합니다.'],
+    'study-check-mission':['입력한 글자를 변수에 저장합니다.','특정 글자와 같은 경우, 그렇지 않은 경우의 행동을 나눠 생각합니다.'],
+    'average-study-minutes':['합계를 담을 변수를 0에서 시작합니다.','목록을 모두 더한 뒤 항목 수로 나누는 순서로 계산합니다.'],
+    'student-average-mission':['목록에서 항목 하나를 꺼내 그 안의 점수를 찾습니다.','반복으로 합계를 만든 뒤 항목 수로 나눕니다.'],
+    'student-average-function-mission':['함수는 학생 목록을 받아야 하고, 평균값을 돌려줘야 합니다.','함수 안에서 점수를 합친 뒤 목록 길이로 나누는 순서를 설계합니다.'],
+  }
+  if(missionSteps[lesson.id])return missionSteps[lesson.id]
+  const unitSteps:Record<string,string[]>={
+    '출력':['화면에 보여 줄 값이 글자인지 숫자인지 먼저 구분합니다.','글자라면 따옴표로 감싼 뒤 출력합니다.'],
+    '변수':['나중에 다시 쓸 값을 의미 있는 이름의 변수에 저장합니다.','저장한 뒤에는 값 대신 변수 이름을 이용해 출력하거나 계산합니다.'],
+    '입력':['입력 결과를 담을 변수를 정합니다.','계산이 필요하면 입력값을 숫자로 바꾸고, 문장에 넣을 때는 문자열로 다룹니다.'],
+    '연산':['계산할 값과 기준값을 구분합니다.','문제의 말(이상, 나누기 등)에 맞는 연산자를 골라 결과를 출력합니다.'],
+    '조건문':['먼저 참 또는 거짓이 되는 조건을 만듭니다.','조건문 줄의 :과 실행 코드의 들여쓰기를 확인합니다.'],
+    '반복문':['반복할 목록 또는 범위를 확인하고, 하나씩 받을 변수 이름을 정합니다.','반복 안에서 할 일을 한 단계 들여씁니다.'],
+    '리스트':['원하는 값이 몇 번째인지 찾은 뒤, 인덱스는 0부터 센 번호로 바꿉니다.','값을 읽을지 바꿀지에 따라 대괄호 표현을 완성합니다.'],
+    '튜플':['튜플에서 필요한 위치를 0부터 세어 인덱스로 찾습니다.','꺼낸 값을 계산식에 연결합니다.'],
+    '딕셔너리':['찾으려는 정보의 키 이름을 확인합니다.','대괄호 안에 키를 넣어 값을 꺼낸 뒤 문장이나 계산에 사용합니다.'],
+    '함수':['함수가 받을 값과 돌려줄 결과를 먼저 정합니다.','정의·들여쓰기·호출 또는 return의 순서를 나눠 확인합니다.'],
+  }
+  return unitSteps[lesson.unit??'']??['문제에서 주어진 값과 만들어야 할 결과를 구분합니다.','코드를 작은 단계로 나누어 한 줄씩 작성합니다.']
+}
 
 export default function AppStudio(){
   const [page,setPage]=useState<Page>('today')
@@ -74,7 +98,7 @@ export default function AppStudio(){
       </section>}
       {page==='studio'&&<section className="learning-studio">
         <aside className="course-panel"><div className="course-panel-head"><span>LEARNING COURSE</span><h2>레벨별 코스</h2><p>제목을 누르면 오른쪽 실습 문제가 바뀝니다.</p></div>{levels.map((items,index)=>items.length>0&&<details key={index} open={levelOf(lesson)===index+1}><summary><span>LEVEL {String(index+1).padStart(2,'0')}</span><strong>{levelName(index+1)}</strong><small>{items.filter(item=>done.includes(item.id)).length}/{items.length}</small></summary>{items.map(item=><button key={item.id} className={item.id===lesson.id?'selected':''} onClick={()=>choose(item)}><b>{done.includes(item.id)?'✓':item.order}</b><span>{item.title}<small>{item.unit}</small></span></button>)}</details>)}</aside>
-        <div className="lesson-panel"><div className="selected-head"><span>LEVEL {levelOf(lesson)} · {lesson.unit}</span><h2>{lesson.title}</h2><p>{lesson.summary}</p></div><details className="concept-details"><summary><span>개념 설명</span><b>열기 +</b></summary><div><h3>무엇을 배우나요?</h3><p>{lesson.concept}</p><h3>왜 배울까요?</h3><p>{lesson.why}</p><div className="sample"><span>예시 코드</span><code>{lesson.example}</code><pre>결과{'\n'}{lesson.exampleOutput}</pre></div></div></details>
+        <div className="lesson-panel"><div className="selected-head"><span>LEVEL {levelOf(lesson)} · {lesson.unit}</span><h2>{lesson.title}</h2><p>{lesson.summary}</p></div><details className="concept-details"><summary><span>개념 설명</span><b>열기 +</b></summary><div><h3>무엇을 배우나요?</h3><p>{lesson.concept}</p><h3>왜 배울까요?</h3><p>{lesson.why}</p><section className="solve-plan"><h3>문제 풀기 전 체크</h3><ol>{conceptSteps(lesson).map((step,index)=><li key={step}><b>{index+1}</b><span>{step}</span></li>)}</ol><p className="answer-note">문제와 같은 완성 코드는 여기서 보여주지 않아요. 막힐 때는 힌트로 한 단계씩 확인해 보세요.</p></section></div></details>
           <article className="practice-card"><span>CODE PRACTICE</span><h3>{lesson.prompt}</h3><label htmlFor="code">코드 작성</label><textarea id="code" value={code} onChange={event=>{setCode(event.target.value);setResult(null);setRunResult(null)}} spellCheck="false"/><div className="code-meta"><span>Python</span><span>UTF-8</span></div><div className="practice-actions"><button className="run" onClick={()=>void run()} disabled={loading}>{loading?'실행 중...':'▷ 실행하기'}</button><button className="grade" onClick={()=>void check()} disabled={loading}>✓ 채점하기</button><button className="hint" onClick={()=>setHint(Math.min(hint+1,lesson.hints.length))}>💡 힌트 {hint?`${hint}/${lesson.hints.length}`:'보기'}</button>{lesson.solution&&<button className="grade" onClick={()=>void showSolution()}>◫ 풀이·해설 보기</button>}</div>
           {runResult&&<div className={`terminal ${runResult.success?'':'error'}`}><header><span><i/><i/><i/> Python Console</span><small>{runResult.success?'실행 완료':'실행 오류'}</small></header><pre>{runResult.success?`>>> 실행 결과\n${runResult.output||'(출력 없음)'}`:`>>> 실행 실패\n${runResult.error}`}</pre></div>}{hint>0&&<div className="hint-card"><strong>힌트 {hint}</strong><p>{lesson.hints[hint-1]}</p></div>}{solutionOpen&&lesson.solution&&<div className="hint-card"><strong>풀이·해설</strong><pre style={{margin:'9px 0',padding:10,borderRadius:6,background:'#252c42',color:'#edf1ff',fontSize:11,whiteSpace:'pre-wrap'}}>{lesson.solution}</pre><p>{lesson.solutionExplanation}</p>{solutionNotice&&<p style={{color:'#6270c9',fontWeight:700}}>{solutionNotice}</p>}</div>}{result&&<div className={`result-card ${result.correct?'success':''}`}><strong>{result.executionError?'실행 오류를 먼저 해결해 볼까요?':result.correct?'정답입니다! 잘했어요. 🎉':'조금만 더 생각해 볼까요?'}</strong><p>{result.feedback}</p>{result.output&&<pre>실행 결과: {result.output}</pre>}</div>}</article>
         </div>
