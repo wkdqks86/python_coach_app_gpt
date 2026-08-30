@@ -161,7 +161,7 @@ def database() -> DatabaseConnection:
     return connection
 def completed_ids() -> list[str]:
     with database() as connection:
-        rows = connection.execute("SELECT DISTINCT lesson_id FROM attempts WHERE correct = 1").fetchall()
+        rows = connection.execute("SELECT DISTINCT lesson_id FROM attempts WHERE correct = TRUE").fetchall()
     return [row[0] for row in rows]
 def due_lessons() -> list[dict]:
     with database() as connection:
