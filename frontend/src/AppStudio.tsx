@@ -9,9 +9,11 @@ type Result = { correct:boolean; output:string; feedback:string; executionError?
 type RunResult = { success:boolean; output:string; error:string }
 type SolutionViewResponse = { success:boolean; message:string; nextReview?:string; dueLessons?:Lesson[]; mistakes?:Mistake[]; todaySession?:Today }
 type Page = 'today'|'studio'|'mistakes'|'kaggle'
+type UserAccess = { nickname:string; accessCode:string }
 
 // Local Vite uses its proxy. In Vercel, VITE_API_URL points at the Render API origin.
 const API=(import.meta.env.VITE_API_URL??'/api').replace(/\/$/,'')
+const USER_STORAGE_KEY='pycoach-user-access'
 const fallback:Lesson[]=[{id:'hello-print',order:1,level:1,unit:'출력',title:'화면에 글자 보여주기',concept:'print()는 컴퓨터에게 내용을 화면에 보여 달라고 하는 명령입니다.',why:'코드를 실행한 결과를 확인하는 가장 첫 도구예요.',example:'print("안녕하세요")',exampleOutput:'안녕하세요',prompt:'화면에 “안녕하세요”를 출력해 보세요.',starterCode:'# 여기에 코드를 작성해 보세요\n',expectedOutput:'안녕하세요',hints:['화면에 내용을 보여줄 때 쓰는 함수를 떠올려 보세요.','글자는 따옴표로 감쌉니다.','print(________)'],summary:'print()는 값을 화면에 출력합니다.',estimatedMinutes:7}]
 const levelOf=(lesson:Lesson)=>lesson.level??(lesson.order<=15?1:lesson.order<=21?2:lesson.order<=27?3:lesson.order<=33?4:5)
 const levelName=(level:number)=>['','파이썬 첫걸음','조건문으로 판단하기','반복으로 데이터 다루기','자료구조로 데이터 묶기','함수로 분석 로직 만들기'][level]??`레벨 ${level}`
@@ -41,12 +43,19 @@ const conceptSteps=(lesson:Lesson)=>{
 }
 
 export default function AppStudio(){
+  const [access,setAccess]=useState<UserAccess|null>(()=>{try{return JSON.parse(localStorage.getItem(USER_STORAGE_KEY)??'null')}catch{return null}})
+  const [authMode,setAuthMode]=useState<'register'|'login'>('register')
+  const [nicknameInput,setNicknameInput]=useState('')
+  const [accessCodeInput,setAccessCodeInput]=useState('')
+  const [authError,setAuthError]=useState('')
+  const [issuedCode,setIssuedCode]=useState<string|null>(null)
+  const [showAccessCode,setShowAccessCode]=useState(false)
   const [page,setPage]=useState<Page>('today')
   const [lessons,setLessons]=useState<Lesson[]>(fallback)
   const [selected,setSelected]=useState('hello-print')
   const [code,setCode]=useState(fallback[0].starterCode)
   const [hint,setHint]=useState(0)
-  const [done,setDone]=useState<string[]>(()=>JSON.parse(localStorage.getItem('pycoach-completed')??'[]'))
+  const [done,setDone]=useState<string[]>([])
   const [today,setToday]=useState<Today|null>(null)
   const [reviews,setReviews]=useState<Lesson[]>([])
   const [mistakes,setMistakes]=useState<Mistake[]>([])
@@ -60,8 +69,11 @@ export default function AppStudio(){
   useEffect(()=>{
     async function loadDashboard(){
       try{
-        const [lessonResponse,progressResponse,reviewResponse,mistakeResponse,todayResponse]=await Promise.all([fetch(`${API}/lessons`),fetch(`${API}/progress`),fetch(`${API}/reviews/due`),fetch(`${API}/mistakes`),fetch(`${API}/today`)])
+        const lessonResponse=await fetch(`${API}/lessons`)
         if(lessonResponse.ok)setLessons(await lessonResponse.json())
+        if(!access)return
+        const headers={'X-PyCoach-Nickname':access.nickname,'X-PyCoach-Access-Code':access.accessCode}
+        const [progressResponse,reviewResponse,mistakeResponse,todayResponse]=await Promise.all([fetch(`${API}/progress`,{headers}),fetch(`${API}/reviews/due`,{headers}),fetch(`${API}/mistakes`,{headers}),fetch(`${API}/today`,{headers})])
         if(progressResponse.ok){const data=await progressResponse.json();setDone(data.completedIds);localStorage.setItem('pycoach-completed',JSON.stringify(data.completedIds))}
         if(reviewResponse.ok)setReviews((await reviewResponse.json()).lessons)
         if(mistakeResponse.ok)setMistakes((await mistakeResponse.json()).mistakes)
@@ -69,7 +81,7 @@ export default function AppStudio(){
       }catch{/* The fallback keeps the first lesson visible while the API starts. */}
     }
     void loadDashboard()
-  },[])
+  },[access])
 
   const lesson=lessons.find(item=>item.id===selected)??lessons[0]
   const levels=useMemo(()=>Array.from({length:5},(_,index)=>lessons.filter(item=>levelOf(item)===index+1)),[lessons])
@@ -81,15 +93,33 @@ export default function AppStudio(){
   function choose(item:Lesson){setSelected(item.id);setCode(item.starterCode);setHint(0);setResult(null);setRunResult(null);setSolutionOpen(false);setSolutionNotice('');go('studio')}
   function update(data:Partial<Result>&Partial<SolutionViewResponse>){if(data.todaySession)setToday(data.todaySession);if(data.dueLessons)setReviews(data.dueLessons);if(data.mistakes)setMistakes(data.mistakes);if(data.completedIds){setDone(data.completedIds);localStorage.setItem('pycoach-completed',JSON.stringify(data.completedIds))}}
 
-  async function run(){setLoading(true);setResult(null);setRunResult(null);try{const response=await fetch(`${API}/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code})});if(!response.ok)throw Error();setRunResult(await response.json())}catch{setRunResult({success:false,output:'',error:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
-  async function check(){setLoading(true);setResult(null);try{const response=await fetch(`${API}/check`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code,hintLevel:hint})});if(!response.ok)throw Error();const data:Result=await response.json();setResult(data);update(data)}catch{setResult({correct:false,output:'',feedback:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
-  async function showSolution(){setSolutionOpen(true);if(!lesson.solution)return;try{const response=await fetch(`${API}/solution-viewed`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id})});if(!response.ok)throw Error();const data:SolutionViewResponse=await response.json();setSolutionNotice(data.message);update(data)}catch{setSolutionNotice('해설은 열었어요. 복습 일정은 백엔드 연결 후 다시 저장됩니다.')}}
+  function apiFetch(path:string, init:RequestInit={}){
+    if(!access)throw new Error('사용자 정보가 없어요.')
+    return fetch(`${API}${path}`,{...init,headers:{...init.headers,'X-PyCoach-Nickname':access.nickname,'X-PyCoach-Access-Code':access.accessCode}})
+  }
+  async function submitAccess(){
+    setAuthError('')
+    try{
+      const response=await fetch(`${API}/users/${authMode==='register'?'register':'login'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(authMode==='register'?{nickname:nicknameInput}:{nickname:nicknameInput,accessCode:accessCodeInput})})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.detail??'사용자 정보를 확인할 수 없어요.')
+      const nextAccess={nickname:data.nickname,accessCode:data.accessCode} as UserAccess
+      localStorage.setItem(USER_STORAGE_KEY,JSON.stringify(nextAccess));setAccess(nextAccess);setIssuedCode(authMode==='register'?data.accessCode:null);setDone([])
+    }catch(error){setAuthError(error instanceof Error?error.message:'사용자 정보를 확인할 수 없어요.')}
+  }
+  function switchUser(){localStorage.removeItem(USER_STORAGE_KEY);setAccess(null);setIssuedCode(null);setAuthMode('login');setNicknameInput('');setAccessCodeInput('');setDone([]);setToday(null);setReviews([]);setMistakes([])}
+
+  async function run(){setLoading(true);setResult(null);setRunResult(null);try{const response=await apiFetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code})});if(!response.ok)throw Error();setRunResult(await response.json())}catch{setRunResult({success:false,output:'',error:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
+  async function check(){setLoading(true);setResult(null);try{const response=await apiFetch('/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code,hintLevel:hint})});if(!response.ok)throw Error();const data:Result=await response.json();setResult(data);update(data)}catch{setResult({correct:false,output:'',feedback:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
+  async function showSolution(){setSolutionOpen(true);if(!lesson.solution)return;try{const response=await apiFetch('/solution-viewed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id})});if(!response.ok)throw Error();const data:SolutionViewResponse=await response.json();setSolutionNotice(data.message);update(data)}catch{setSolutionNotice('해설은 열었어요. 복습 일정은 백엔드 연결 후 다시 저장됩니다.')}}
   const Nav=({id,label,icon}:{id:Page;label:string;icon:string})=><button className={page===id?'active':''} onClick={()=>go(id)}><span>{icon}</span>{label}</button>
+
+  if(!access||issuedCode)return <main style={{minHeight:'100vh',display:'grid',placeItems:'center',padding:20,background:'#f7f8fc',color:'#29354c'}}><section style={{width:'min(440px,100%)',padding:30,border:'1px solid #e2e6f0',borderRadius:16,background:'#fff',boxShadow:'0 16px 38px #dfe3ef'}}><p style={{margin:0,color:'#7180db',fontSize:11,fontWeight:800,letterSpacing:1}}>PYCOACH PERSONAL PROGRESS</p><h1 style={{margin:'10px 0 8px'}}>나만의 학습 기록을 시작해요</h1>{issuedCode?<><p style={{color:'#68758d',lineHeight:1.6}}>다른 기기에서 같은 진도를 이어갈 때 필요한 접속 코드예요. 안전한 곳에 저장해 주세요.</p><strong style={{display:'block',margin:'18px 0',padding:16,borderRadius:10,background:'#f0f2ff',color:'#5667cf',fontSize:30,letterSpacing:8,textAlign:'center'}}>{issuedCode}</strong><button onClick={()=>setIssuedCode(null)} style={{width:'100%',border:0,borderRadius:8,padding:12,background:'#596bdb',color:'#fff',fontWeight:800}}>코드를 저장했어요</button></>:<><p style={{color:'#68758d',lineHeight:1.6}}>닉네임은 친구들과 겹치지 않게 한 번만 만들어요. 접속 코드는 다른 기기에서 내 기록을 이어갈 때 사용합니다.</p><div style={{display:'flex',gap:8,margin:'20px 0 14px'}}><button onClick={()=>setAuthMode('register')} style={{border:0,background:'transparent',color:authMode==='register'?'#5667cf':'#8c96a7',fontWeight:800}}>처음 시작</button><button onClick={()=>setAuthMode('login')} style={{border:0,background:'transparent',color:authMode==='login'?'#5667cf':'#8c96a7',fontWeight:800}}>다른 기기에서 이어하기</button></div><input value={nicknameInput} onChange={event=>setNicknameInput(event.target.value)} placeholder="닉네임 (2~16자)" style={{width:'100%',marginBottom:10,padding:12,border:'1px solid #dce1ed',borderRadius:8}}/>{authMode==='login'&&<input value={accessCodeInput} onChange={event=>setAccessCodeInput(event.target.value.replace(/\D/g,'').slice(0,6))} placeholder="6자리 접속 코드" inputMode="numeric" style={{width:'100%',marginBottom:10,padding:12,border:'1px solid #dce1ed',borderRadius:8}}/>}{authError&&<p style={{color:'#bd625a',fontSize:12}}>{authError}</p>}<button onClick={()=>void submitAccess()} style={{width:'100%',border:0,borderRadius:8,padding:12,background:'#596bdb',color:'#fff',fontWeight:800}}>{authMode==='register'?'닉네임으로 시작하기':'내 기록 불러오기'}</button></>}</section></main>
 
   return <div className="studio-shell">
     <aside className="studio-sidebar"><button className="studio-brand" onClick={()=>go('today')}><b>&lt;/&gt;</b><span>PyCoach<small>PYTHON LEARNING LAB</small></span></button><p>학습 메뉴</p><nav><Nav id="today" icon="⌂" label="오늘의 학습"/><Nav id="studio" icon="▦" label="학습 스튜디오"/><Nav id="mistakes" icon="◌" label="오답노트"/><Nav id="kaggle" icon="◇" label="Kaggle 준비"/></nav><div className="side-meter"><small>전체 진도</small><strong>{progress}%</strong><i><em style={{width:`${progress}%`}}/></i><span>{done.length} / {lessons.length} 레슨 완료</span></div></aside>
     <main className="studio-main">
-      <header className="studio-header"><div><span>PYCOACH</span><h1>{page==='today'?'오늘의 학습':page==='studio'?'학습 스튜디오':page==='mistakes'?'오답노트':'Kaggle Ready'}</h1><p>{page==='studio'?'왼쪽에서 레슨을 고르고 개념을 확인한 뒤, 오른쪽에서 직접 실행해 보세요.':page==='today'?'오늘 필요한 만큼만 학습하고, 기억이 흐려지기 전에 다시 만나요.':page==='mistakes'?'틀린 문제와 해설을 본 문제는 일정 시간이 지난 뒤 다시 풉니다.':'경진대회 전에 표 데이터의 행, 특징, 타깃을 먼저 읽어 봅니다.'}</p></div><b className="streak">🔥 3일 연속</b></header>
+      <header className="studio-header"><div><span>PYCOACH</span><h1>{page==='today'?'오늘의 학습':page==='studio'?'학습 스튜디오':page==='mistakes'?'오답노트':'Kaggle Ready'}</h1><p>{page==='studio'?'왼쪽에서 레슨을 고르고 개념을 확인한 뒤, 오른쪽에서 직접 실행해 보세요.':page==='today'?'오늘 필요한 만큼만 학습하고, 기억이 흐려지기 전에 다시 만나요.':page==='mistakes'?'틀린 문제와 해설을 본 문제는 일정 시간이 지난 뒤 다시 풉니다.':'경진대회 전에 표 데이터를 읽고, 타깃을 먼저 판단해 봅니다.'}</p></div><div style={{display:'grid',gap:7,justifyItems:'end'}}><b className="streak">🔥 3일 연속</b><button onClick={()=>setShowAccessCode(!showAccessCode)} style={{border:0,background:'transparent',color:'#6878d2',fontSize:11,cursor:'pointer'}}>내 접속 코드 {showAccessCode?access.accessCode:'보기'}</button><button onClick={switchUser} style={{border:0,background:'transparent',color:'#6878d2',fontSize:11,cursor:'pointer'}}>{access.nickname} · 사용자 전환</button></div></header>
       {page==='today'&&<section>
         <article className="today-banner"><span>오늘의 작은 목표</span><h2>{next?next.itemType==='review'?'복습 문제를 다시 꺼내 볼까요?':`${next.title}을(를) 시작해 볼까요?`:'오늘 계획을 모두 마쳤어요!'}</h2><p>{next?`약 ${today?.estimatedMinutes??next.estimatedMinutes}분이면 충분해요. 이해한 뒤 직접 작성해 보세요.`:'다음 복습이 준비되면 이곳에서 알려 드릴게요.'}</p>{next&&<button onClick={()=>choose(next)}>학습 시작하기 →</button>}</article>
         <div className="today-stats"><article><small>전체 진도</small><strong>{progress}%</strong><span>{done.length}/{lessons.length} 레슨</span></article><article><small>오늘의 복습</small><strong>{today?.reviewCount??reviews.length}</strong><span>기억을 다시 꺼낼 문제</span></article><article><small>오답·해설 복습</small><strong>{mistakes.length}</strong><span>다시 볼 문제</span></article></div>

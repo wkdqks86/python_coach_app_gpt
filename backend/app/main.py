@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import os
 import re
+import secrets
 import sqlite3
+import unicodedata
+import uuid
 from contextlib import redirect_stdout
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -42,6 +46,30 @@ class RunRequest(BaseModel):
 
 class SolutionViewedRequest(BaseModel):
     lessonId: str
+
+
+class UserRegisterRequest(BaseModel):
+    nickname: str
+
+
+class UserLoginRequest(BaseModel):
+    nickname: str
+    accessCode: str
+
+
+def normalize_nickname(nickname: str) -> tuple[str, str]:
+    display_name = unicodedata.normalize("NFKC", nickname).strip()
+    if not re.fullmatch(r"[가-힣A-Za-z0-9_-]{2,16}", display_name):
+        raise HTTPException(400, "닉네임은 2~16자의 한글·영문·숫자·_·-만 사용할 수 있어요.")
+    return display_name, display_name.casefold()
+
+
+def code_hash(access_code: str) -> str:
+    return hashlib.sha256(access_code.encode("utf-8")).hexdigest()
+
+
+def new_access_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 def scaffold_hint(solution: str) -> str:
@@ -92,6 +120,46 @@ class DatabaseConnection:
         return cursor.executemany(query, parameter_sets)
 
 
+def ensure_user_tables(connection: DatabaseConnection) -> None:
+    """Keep new personal progress separate from the original shared demo data."""
+    connection.execute("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        nickname TEXT NOT NULL,
+        nickname_key TEXT NOT NULL UNIQUE,
+        access_code_hash TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS user_attempts (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        lesson_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        output TEXT NOT NULL,
+        correct BOOLEAN NOT NULL,
+        hint_level INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS user_lesson_progress (
+        user_id TEXT NOT NULL,
+        lesson_id TEXT NOT NULL,
+        next_review_at TEXT NOT NULL,
+        review_stage INTEGER NOT NULL DEFAULT 0,
+        consecutive_without_hint INTEGER NOT NULL DEFAULT 0,
+        last_result TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, lesson_id)
+    )""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS user_daily_plan_items (
+        user_id TEXT NOT NULL,
+        plan_date TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        lesson_id TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        completed_at TIMESTAMPTZ,
+        PRIMARY KEY (user_id, plan_date, position)
+    )""")
+
+
 def database() -> DatabaseConnection:
     if DATABASE_URL:
         try:
@@ -124,6 +192,7 @@ def database() -> DatabaseConnection:
             completed_at TIMESTAMPTZ,
             PRIMARY KEY (plan_date, position)
         )""")
+        ensure_user_tables(connection)
         connection.connection.commit()  # type: ignore[attr-defined]
         return connection
 
@@ -157,25 +226,67 @@ def database() -> DatabaseConnection:
         completed_at TEXT,
         PRIMARY KEY (plan_date, position)
     )""")
+    ensure_user_tables(connection)
     connection.connection.commit()  # type: ignore[attr-defined]
     return connection
-def completed_ids() -> list[str]:
+def current_user(
+    x_pycoach_nickname: str = Header(default=""),
+    x_pycoach_access_code: str = Header(default=""),
+) -> dict[str, str]:
+    _, nickname_key = normalize_nickname(x_pycoach_nickname)
+    if not re.fullmatch(r"\d{6}", x_pycoach_access_code):
+        raise HTTPException(401, "닉네임 또는 접속 코드를 확인해 주세요.")
     with database() as connection:
-        rows = connection.execute("SELECT DISTINCT lesson_id FROM attempts WHERE correct = TRUE").fetchall()
+        row = connection.execute(
+            "SELECT id, nickname FROM users WHERE nickname_key = ? AND access_code_hash = ?",
+            (nickname_key, code_hash(x_pycoach_access_code)),
+        ).fetchone()
+    if not row:
+        raise HTTPException(401, "닉네임 또는 접속 코드를 확인해 주세요.")
+    return {"id": row[0], "nickname": row[1]}
+
+
+@app.post("/api/users/register")
+def register_user(request: UserRegisterRequest) -> dict[str, str]:
+    nickname, nickname_key = normalize_nickname(request.nickname)
+    access_code = new_access_code()
+    with database() as connection:
+        if connection.execute("SELECT 1 FROM users WHERE nickname_key = ?", (nickname_key,)).fetchone():
+            raise HTTPException(409, "이미 사용 중인 닉네임이에요. 다른 닉네임을 골라 주세요.")
+        connection.execute(
+            "INSERT INTO users (id, nickname, nickname_key, access_code_hash) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), nickname, nickname_key, code_hash(access_code)),
+        )
+    return {"nickname": nickname, "accessCode": access_code}
+
+
+@app.post("/api/users/login")
+def login_user(request: UserLoginRequest) -> dict[str, str]:
+    user = current_user(request.nickname, request.accessCode)
+    return {"nickname": user["nickname"], "accessCode": request.accessCode}
+
+
+def completed_ids(user_id: str) -> list[str]:
+    with database() as connection:
+        rows = connection.execute("SELECT DISTINCT lesson_id FROM user_attempts WHERE user_id = ? AND correct = TRUE", (user_id,)).fetchall()
     return [row[0] for row in rows]
-def due_lessons() -> list[dict]:
+
+
+def due_lessons(user_id: str) -> list[dict]:
     with database() as connection:
         rows = connection.execute(
-            "SELECT lesson_id FROM lesson_progress WHERE next_review_at <= ? ORDER BY next_review_at, lesson_id",
-            (date.today().isoformat(),),
+            "SELECT lesson_id FROM user_lesson_progress WHERE user_id = ? AND next_review_at <= ? ORDER BY next_review_at, lesson_id",
+            (user_id, date.today().isoformat()),
         ).fetchall()
     due_ids = {row[0] for row in rows}
     return [lesson for lesson in LESSONS if lesson["id"] in due_ids]
-def record_attempt(lesson_id: str, code: str, output: str, correct: bool, hint_level: int) -> str:
+
+
+def record_attempt(user_id: str, lesson_id: str, code: str, output: str, correct: bool, hint_level: int) -> str:
     with database() as connection:
         previous = connection.execute(
-            "SELECT review_stage, consecutive_without_hint FROM lesson_progress WHERE lesson_id = ?",
-            (lesson_id,),
+            "SELECT review_stage, consecutive_without_hint FROM user_lesson_progress WHERE user_id = ? AND lesson_id = ?",
+            (user_id, lesson_id),
         ).fetchone()
         previous_stage, previous_streak = previous if previous else (0, 0)
         if not correct:
@@ -188,52 +299,52 @@ def record_attempt(lesson_id: str, code: str, output: str, correct: bool, hint_l
             next_stage = min(previous_stage + 1, 3)
         next_review_at = (date.today() + timedelta(days=days_until_review)).isoformat()
         connection.execute(
-            "INSERT INTO attempts (lesson_id, code, output, correct, hint_level) VALUES (?, ?, ?, ?, ?)",
-            (lesson_id, code, output, correct, hint_level),
+            "INSERT INTO user_attempts (id, user_id, lesson_id, code, output, correct, hint_level) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), user_id, lesson_id, code, output, correct, hint_level),
         )
         connection.execute(
-            """INSERT INTO lesson_progress
-            (lesson_id, next_review_at, review_stage, consecutive_without_hint, last_result)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(lesson_id) DO UPDATE SET
+            """INSERT INTO user_lesson_progress
+            (user_id, lesson_id, next_review_at, review_stage, consecutive_without_hint, last_result)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, lesson_id) DO UPDATE SET
                 next_review_at = excluded.next_review_at,
                 review_stage = excluded.review_stage,
                 consecutive_without_hint = excluded.consecutive_without_hint,
                 last_result = excluded.last_result,
                 updated_at = CURRENT_TIMESTAMP""",
-            (lesson_id, next_review_at, next_stage, streak, "correct" if correct else "incorrect"),
+            (user_id, lesson_id, next_review_at, next_stage, streak, "correct" if correct else "incorrect"),
         )
     return next_review_at
 
 
-def record_solution_view(lesson_id: str) -> str:
+def record_solution_view(user_id: str, lesson_id: str) -> str:
     """Schedule a quick retry after a learner checks the full solution."""
     next_review_at = (date.today() + timedelta(days=1)).isoformat()
     with database() as connection:
         connection.execute(
-            """INSERT INTO lesson_progress
-            (lesson_id, next_review_at, review_stage, consecutive_without_hint, last_result)
-            VALUES (?, ?, 0, 0, 'solution_viewed')
-            ON CONFLICT(lesson_id) DO UPDATE SET
+            """INSERT INTO user_lesson_progress
+            (user_id, lesson_id, next_review_at, review_stage, consecutive_without_hint, last_result)
+            VALUES (?, ?, ?, 0, 0, 'solution_viewed')
+            ON CONFLICT(user_id, lesson_id) DO UPDATE SET
                 next_review_at = excluded.next_review_at,
                 review_stage = 0,
                 consecutive_without_hint = 0,
                 last_result = excluded.last_result,
                 updated_at = CURRENT_TIMESTAMP""",
-            (lesson_id, next_review_at),
+            (user_id, lesson_id, next_review_at),
         )
     return next_review_at
-def create_today_plan() -> None:
+def create_today_plan(user_id: str) -> None:
     today = date.today().isoformat()
     with database() as connection:
         existing = connection.execute(
-            "SELECT 1 FROM daily_plan_items WHERE plan_date = ? LIMIT 1", (today,)
+            "SELECT 1 FROM user_daily_plan_items WHERE user_id = ? AND plan_date = ? LIMIT 1", (user_id, today)
         ).fetchone()
     if existing:
         return
 
-    completed = set(completed_ids())
-    review_candidates = due_lessons()
+    completed = set(completed_ids(user_id))
+    review_candidates = due_lessons(user_id)
     next_new = next((lesson for lesson in LESSONS if lesson["id"] not in completed and lesson not in review_candidates), None)
     selected: list[tuple[dict, str]] = []
     minutes = 0
@@ -247,17 +358,17 @@ def create_today_plan() -> None:
 
     with database() as connection:
         connection.executemany(
-            "INSERT INTO daily_plan_items (plan_date, position, lesson_id, item_type) VALUES (?, ?, ?, ?)",
-            [(today, position, lesson["id"], item_type) for position, (lesson, item_type) in enumerate(selected, start=1)],
+            "INSERT INTO user_daily_plan_items (user_id, plan_date, position, lesson_id, item_type) VALUES (?, ?, ?, ?, ?)",
+            [(user_id, today, position, lesson["id"], item_type) for position, (lesson, item_type) in enumerate(selected, start=1)],
         )
-def today_session() -> dict[str, object]:
-    create_today_plan()
+def today_session(user_id: str) -> dict[str, object]:
+    create_today_plan(user_id)
     today = date.today().isoformat()
     lesson_by_id = {lesson["id"]: lesson for lesson in LESSONS}
     with database() as connection:
         rows = connection.execute(
-            "SELECT lesson_id, item_type, completed_at FROM daily_plan_items WHERE plan_date = ? ORDER BY position",
-            (today,),
+            "SELECT lesson_id, item_type, completed_at FROM user_daily_plan_items WHERE user_id = ? AND plan_date = ? ORDER BY position",
+            (user_id, today),
         ).fetchall()
     items = [
         {**lesson_by_id[lesson_id], "itemType": item_type, "completedToday": completed_at is not None}
@@ -271,20 +382,22 @@ def today_session() -> dict[str, object]:
         "reviewCount": sum(item["itemType"] == "review" and not item["completedToday"] for item in items),
         "newCount": sum(item["itemType"] == "new" and not item["completedToday"] for item in items),
     }
-def mark_today_item_completed(lesson_id: str) -> None:
+def mark_today_item_completed(user_id: str, lesson_id: str) -> None:
     with database() as connection:
         connection.execute(
-            "UPDATE daily_plan_items SET completed_at = CURRENT_TIMESTAMP WHERE plan_date = ? AND lesson_id = ?",
-            (date.today().isoformat(), lesson_id),
+            "UPDATE user_daily_plan_items SET completed_at = CURRENT_TIMESTAMP WHERE user_id = ? AND plan_date = ? AND lesson_id = ?",
+            (user_id, date.today().isoformat(), lesson_id),
         )
-def mistake_lessons() -> list[dict]:
+def mistake_lessons(user_id: str) -> list[dict]:
     with database() as connection:
         attempts = connection.execute(
             """SELECT lesson_id, code, output, hint_level, created_at
-            FROM attempts WHERE correct = FALSE ORDER BY created_at DESC, id DESC"""
+            FROM user_attempts WHERE user_id = ? AND correct = FALSE ORDER BY created_at DESC, id DESC""",
+            (user_id,),
         ).fetchall()
         progress_rows = connection.execute(
-            "SELECT lesson_id, next_review_at, consecutive_without_hint, last_result FROM lesson_progress"
+            "SELECT lesson_id, next_review_at, consecutive_without_hint, last_result FROM user_lesson_progress WHERE user_id = ?",
+            (user_id,),
         ).fetchall()
     progress_by_lesson = {
         lesson_id: {"nextReview": next_review_at, "streak": streak, "lastResult": last_result}
@@ -381,32 +494,32 @@ def health() -> dict[str,str]: return {"status":"ok"}
 @app.get("/api/lessons")
 def list_lessons() -> list[dict]: return [lesson_for_client(lesson) for lesson in LESSONS]
 @app.get("/api/progress")
-def progress() -> dict[str, object]:
-    return {"completedIds": completed_ids(), "dueReviewCount": len(due_lessons()), "mistakeCount": len(mistake_lessons())}
+def progress(user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
+    return {"completedIds": completed_ids(user["id"]), "dueReviewCount": len(due_lessons(user["id"])), "mistakeCount": len(mistake_lessons(user["id"])), "nickname": user["nickname"]}
 @app.get("/api/reviews/due")
-def due_reviews() -> dict[str, list[dict]]:
-    return {"lessons": due_lessons()}
+def due_reviews(user: dict[str, str] = Depends(current_user)) -> dict[str, list[dict]]:
+    return {"lessons": due_lessons(user["id"])}
 @app.get("/api/mistakes")
-def mistakes() -> dict[str, list[dict]]:
-    return {"mistakes": mistake_lessons()}
+def mistakes(user: dict[str, str] = Depends(current_user)) -> dict[str, list[dict]]:
+    return {"mistakes": mistake_lessons(user["id"])}
 @app.get("/api/today")
-def today() -> dict[str, object]:
-    return today_session()
+def today(user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
+    return today_session(user["id"])
 
 
 @app.post("/api/solution-viewed")
-def solution_viewed(request: SolutionViewedRequest) -> dict[str, object]:
+def solution_viewed(request: SolutionViewedRequest, user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
     lesson = next((item for item in LESSONS if item["id"] == request.lessonId), None)
     if not lesson:
         return {"success": False, "message": "레슨 정보를 찾지 못했어요."}
-    next_review = record_solution_view(lesson["id"])
+    next_review = record_solution_view(user["id"], lesson["id"])
     return {
         "success": True,
         "nextReview": next_review,
         "message": "해설을 확인한 문제는 내일 다시 풀 수 있도록 복습에 등록했어요.",
-        "dueLessons": due_lessons(),
-        "mistakes": mistake_lessons(),
-        "todaySession": today_session(),
+        "dueLessons": due_lessons(user["id"]),
+        "mistakes": mistake_lessons(user["id"]),
+        "todaySession": today_session(user["id"]),
     }
 
 
@@ -424,7 +537,7 @@ def run_code(request: RunRequest) -> dict[str, object]:
 
 
 @app.post("/api/check")
-def check_code(request: CheckRequest) -> dict[str, object]:
+def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
     lesson=next((x for x in LESSONS if x["id"]==request.lessonId),None)
     if not lesson:return {"correct":False,"output":"","feedback":"레슨 정보를 찾지 못했어요."}
     try: output=run_safe_code(request.code, lesson.get("inputs", []))
@@ -441,7 +554,7 @@ def check_code(request: CheckRequest) -> dict[str, object]:
         if correct
         else "실행 결과를 문제에서 요구한 문장과 비교해 보세요. 힌트를 한 단계 확인해도 좋아요."
     )
-    next_review = record_attempt(lesson["id"], request.code, output, correct, request.hintLevel)
+    next_review = record_attempt(user["id"], lesson["id"], request.code, output, correct, request.hintLevel)
     if correct:
-        mark_today_item_completed(lesson["id"])
-    return {"correct":correct,"output":output,"feedback":feedback,"nextReview":next_review,"completedIds":completed_ids(),"dueLessons":due_lessons(),"mistakes":mistake_lessons(),"todaySession":today_session()}
+        mark_today_item_completed(user["id"], lesson["id"])
+    return {"correct":correct,"output":output,"feedback":feedback,"nextReview":next_review,"completedIds":completed_ids(user["id"]),"dueLessons":due_lessons(user["id"]),"mistakes":mistake_lessons(user["id"]),"todaySession":today_session(user["id"])}
