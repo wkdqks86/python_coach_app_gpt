@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './AppStudio.css'
 import './ConceptGuide.css'
 
@@ -91,6 +91,7 @@ export default function AppStudio(){
   const [labAnswer,setLabAnswer]=useState<string|null>(null)
   const [solutionOpen,setSolutionOpen]=useState(false)
   const [solutionNotice,setSolutionNotice]=useState('')
+  const codeInputRef=useRef<HTMLTextAreaElement|null>(null)
 
   useEffect(()=>{
     async function loadDashboard(){
@@ -135,6 +136,26 @@ export default function AppStudio(){
   }
   function switchUser(){localStorage.removeItem(USER_STORAGE_KEY);setAccess(null);setIssuedCode(null);setAuthMode('login');setNicknameInput('');setAccessCodeInput('');setDone([]);setToday(null);setReviews([]);setMistakes([])}
 
+  function indentCode(){
+    const input=codeInputRef.current
+    if(!input)return
+    const start=input.selectionStart
+    const end=input.selectionEnd
+    const lineStart=code.lastIndexOf('\n',Math.max(0,start-1))+1
+    const selectedLines=code.slice(lineStart,end)
+    const indented=selectedLines.split('\n').map(line=>`    ${line}`).join('\n')
+    const nextCode=`${code.slice(0,lineStart)}${indented}${code.slice(end)}`
+    const lineCount=selectedLines.split('\n').length
+    setCode(nextCode)
+    setResult(null)
+    setRunResult(null)
+    requestAnimationFrame(()=>{
+      const updated=codeInputRef.current
+      if(!updated)return
+      updated.focus()
+      updated.setSelectionRange(start+4,end+4*lineCount)
+    })
+  }
   async function run(){setLoading(true);setResult(null);setRunResult(null);try{const response=await apiFetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code})});if(!response.ok)throw Error();setRunResult(await response.json())}catch{setRunResult({success:false,output:'',error:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
   async function check(){setLoading(true);setResult(null);try{const response=await apiFetch('/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id,code,hintLevel:hint})});if(!response.ok)throw Error();const data:Result=await response.json();setResult(data);update(data)}catch{setResult({correct:false,output:'',feedback:'백엔드에 연결할 수 없어요.'})}finally{setLoading(false)}}
   async function showSolution(){setSolutionOpen(true);if(!lesson.solution)return;try{const response=await apiFetch('/solution-viewed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessonId:lesson.id})});if(!response.ok)throw Error();const data:SolutionViewResponse=await response.json();setSolutionNotice(data.message);update(data)}catch{setSolutionNotice('해설은 열었어요. 복습 일정은 백엔드 연결 후 다시 저장됩니다.')}}
@@ -155,7 +176,7 @@ export default function AppStudio(){
       {page==='studio'&&<section className="learning-studio">
         <aside className="course-panel"><div className="course-panel-head"><span>LEARNING COURSE</span><h2>레벨별 코스</h2><p>제목을 누르면 오른쪽 실습 문제가 바뀝니다.</p></div>{levels.map((items,index)=>items.length>0&&<details key={index} open={levelOf(lesson)===index+1}><summary><span>LEVEL {String(index+1).padStart(2,'0')}</span><strong>{levelName(index+1)}</strong><small>{items.filter(item=>done.includes(item.id)).length}/{items.length}</small></summary>{items.map(item=><button key={item.id} className={item.id===lesson.id?'selected':''} onClick={()=>choose(item)}><b>{done.includes(item.id)?'✓':item.order}</b><span>{item.title}<small>{item.unit}</small></span></button>)}</details>)}</aside>
         <div className="lesson-panel"><div className="selected-head"><span>LEVEL {levelOf(lesson)} · {lesson.unit}</span><h2>{lesson.title}</h2><p>{lesson.summary}</p></div><details className="concept-details"><summary><span>개념 설명</span><b>열기 +</b></summary><div>{(()=>{const reference=conceptReference(lesson);return <><section className="concept-intro"><p className="concept-eyebrow">핵심 원리</p><h3>{reference.title}</h3><p>{lesson.concept}</p><p className="concept-why">{lesson.why}</p></section><div className="concept-grid"><section className="concept-block"><p className="concept-eyebrow">문법 구조</p><pre className="syntax-pattern"><code>{reference.pattern}</code></pre><p>{reference.note}</p></section><section className="concept-block pitfall"><p className="concept-eyebrow">자주 막히는 지점</p><p>{reference.pitfall}</p></section></div><section className="solve-plan"><p className="concept-eyebrow">문제 풀이 순서</p><ol>{conceptSteps(lesson).map((step,index)=><li key={step}><b>{index+1}</b><span>{step}</span></li>)}</ol><p className="answer-note">위 문법 구조는 원리를 익히기 위한 예시입니다. 현재 문제의 완성 답안은 보여주지 않아요.</p></section></>})()}</div></details>
-          <article className="practice-card"><span>CODE PRACTICE</span><h3>{lesson.prompt}</h3><label htmlFor="code">코드 작성</label><textarea id="code" value={code} onChange={event=>{setCode(event.target.value);setResult(null);setRunResult(null)}} spellCheck="false" autoCapitalize="off" autoCorrect="off" autoComplete="off"/><div className="code-meta"><span>Python</span><span>UTF-8</span></div><div className="practice-actions"><button className="run" onClick={()=>void run()} disabled={loading}>{loading?'실행 중...':'▷ 실행하기'}</button><button className="grade" onClick={()=>void check()} disabled={loading}>✓ 채점하기</button><button className="hint" onClick={()=>setHint(Math.min(hint+1,lesson.hints.length))}>💡 힌트 {hint?`${hint}/${lesson.hints.length}`:'보기'}</button>{lesson.solution&&<button className="grade" onClick={()=>void showSolution()}>◫ 풀이·해설 보기</button>}</div>
+          <article className="practice-card"><span>CODE PRACTICE</span><h3>{lesson.prompt}</h3><label htmlFor="code">코드 작성</label><textarea ref={codeInputRef} id="code" value={code} onChange={event=>{setCode(event.target.value);setResult(null);setRunResult(null)}} onKeyDown={event=>{if(event.key==='Tab'){event.preventDefault();indentCode()}}} spellCheck="false" autoCapitalize="off" autoCorrect="off" autoComplete="off"/><div className="code-meta"><span>Python</span><button className="indent-button" type="button" onClick={indentCode} title="선택한 줄 또는 현재 줄 들여쓰기">↹ 들여쓰기</button><span>UTF-8</span></div><div className="practice-actions"><button className="run" onClick={()=>void run()} disabled={loading}>{loading?'실행 중...':'▷ 실행하기'}</button><button className="grade" onClick={()=>void check()} disabled={loading}>✓ 채점하기</button><button className="hint" onClick={()=>setHint(Math.min(hint+1,lesson.hints.length))}>💡 힌트 {hint?`${hint}/${lesson.hints.length}`:'보기'}</button>{lesson.solution&&<button className="grade" onClick={()=>void showSolution()}>◫ 풀이·해설 보기</button>}</div>
           {runResult&&<div className={`terminal ${runResult.success?'':'error'}`}><header><span><i/><i/><i/> Python Console</span><small>{runResult.success?'실행 완료':'실행 오류'}</small></header><pre>{runResult.success?`>>> 실행 결과\n${runResult.output||'(출력 없음)'}`:`>>> 실행 실패\n${runResult.error}`}</pre></div>}{hint>0&&<div className="hint-card"><strong>힌트 {hint}</strong><p>{lesson.hints[hint-1]}</p></div>}{solutionOpen&&lesson.solution&&<div className="hint-card"><strong>풀이·해설</strong><pre style={{margin:'9px 0',padding:10,borderRadius:6,background:'#252c42',color:'#edf1ff',fontSize:11,whiteSpace:'pre-wrap'}}>{lesson.solution}</pre><p>{lesson.solutionExplanation}</p>{solutionNotice&&<p style={{color:'#6270c9',fontWeight:700}}>{solutionNotice}</p>}</div>}{result&&<div className={`result-card ${result.correct?'success':''}`}><strong>{result.executionError?'실행 오류를 먼저 해결해 볼까요?':result.correct?'정답입니다! 잘했어요. 🎉':'조금만 더 생각해 볼까요?'}</strong><p>{result.feedback}</p>{result.output&&<pre>실행 결과: {result.output}</pre>}</div>}</article>
         </div>
       </section>}

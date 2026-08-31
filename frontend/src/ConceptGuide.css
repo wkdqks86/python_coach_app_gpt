@@ -142,6 +142,32 @@
   font-size: 12px !important;
 }
 
+.code-meta {
+  justify-content: flex-start;
+  gap: 9px;
+}
+
+.code-meta > span:last-child {
+  margin-left: auto;
+}
+
+.indent-button {
+  border: 1px solid #4d587a;
+  border-radius: 5px;
+  background: #2b334b;
+  padding: 3px 7px;
+  color: #dfe6ff;
+  font: 600 10px Pretendard, "Noto Sans KR", sans-serif;
+  cursor: pointer;
+}
+
+.indent-button:hover,
+.indent-button:focus-visible {
+  border-color: #8b99f2;
+  background: #37415f;
+  outline: none;
+}
+
 @media (max-width: 740px) {
   .concept-details summary {
     min-height: 54px;
@@ -164,5 +190,11 @@
   .concept-details p,
   .solve-plan li {
     font-size: 13px;
+  }
+
+  .indent-button {
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 11px;
   }
 }
