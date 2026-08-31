@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './AppStudio.css'
+import './ConceptGuide.css'
 
 type Lesson = { id:string; order:number; level?:number; unit?:string; title:string; concept:string; why:string; example:string; exampleOutput:string; prompt:string; starterCode:string; expectedOutput:string; hints:string[]; solution?:string; solutionExplanation?:string; summary:string; estimatedMinutes:number }
 type Mistake = { lessonId:string; title:string; unit:string; code:string; output:string; expectedOutput:string; hintLevel:number; nextReview:string }
@@ -40,6 +41,31 @@ const conceptSteps=(lesson:Lesson)=>{
     '함수':['함수가 받을 값과 돌려줄 결과를 먼저 정합니다.','정의·들여쓰기·호출 또는 return의 순서를 나눠 확인합니다.'],
   }
   return unitSteps[lesson.unit??'']??['문제에서 주어진 값과 만들어야 할 결과를 구분합니다.','코드를 작은 단계로 나누어 한 줄씩 작성합니다.']
+}
+type ConceptReference={title:string; pattern:string; note:string; pitfall:string}
+const conceptReference=(lesson:Lesson):ConceptReference=>{
+  const missions:Record<string,ConceptReference>={
+    'profile-mission':{title:'입력값과 문장을 조합하는 흐름',pattern:'이름 = input()\n주제 = "값"\nprint(f"{이름}님은 {주제}을 공부해요.")',note:'바뀌는 정보는 변수에, 늘 같은 문구는 따옴표 안에 둡니다.',pitfall:'f를 빼거나 변수 이름을 중괄호 밖에 두면 값이 문장에 들어가지 않습니다.'},
+    'shopping-mission':{title:'입력한 숫자로 계산하기',pattern:'가격 = int(input())\n수량 = int(input())\n합계 = 가격 * 수량\nprint(합계)',note:'input()의 결과는 글자이므로 계산 전 int()로 바꿉니다.',pitfall:'숫자로 바꾸지 않으면 곱셈이 기대한 계산이 아닌 글자 반복이 될 수 있습니다.'},
+    'study-check-mission':{title:'입력에 따라 갈라지는 흐름',pattern:'답 = input()\nif 답 == "기준값":\n    print("참일 때")\nelse:\n    print("거짓일 때")',note:'비교는 ==, 조건문 줄 끝에는 :를 사용합니다.',pitfall:'조건문 아래 실행문은 반드시 한 단계 들여써야 합니다.'},
+    'average-study-minutes':{title:'반복으로 평균 만들기',pattern:'합계 = 0\nfor 값 in 목록:\n    합계 += 값\n평균 = 합계 / len(목록)',note:'합계 → 반복 → 나누기의 순서를 먼저 세우면 복잡한 문제도 풀기 쉬워집니다.',pitfall:'합계를 0으로 시작하지 않거나 반복문 밖에서 더하면 원하는 결과가 나오지 않습니다.'},
+    'student-average-mission':{title:'중첩 데이터에서 값 꺼내기',pattern:'for 학생 in 학생목록:\n    점수 = 학생["점수"]\n    # 점수를 합계에 더하기',note:'목록에서는 한 명씩, 딕셔너리에서는 키로 필요한 정보를 찾습니다.',pitfall:'목록의 순서와 딕셔너리의 키 접근을 섞어 쓰지 않도록 구분합니다.'},
+    'student-average-function-mission':{title:'함수로 평균 계산을 묶기',pattern:'def 평균_계산(값목록):\n    합계 = 0\n    # 합계를 만든 뒤 평균 반환\n    return 결과',note:'함수는 입력(매개변수)과 출력(return)을 함께 설계합니다.',pitfall:'return을 함수 밖에 두거나 호출만 하고 결과를 사용하지 않는 실수를 조심합니다.'},
+  }
+  if(missions[lesson.id])return missions[lesson.id]
+  const byUnit:Record<string,ConceptReference>={
+    '출력':{title:'값을 화면에 보여 주는 기본 구조',pattern:'print("보여 줄 글자")\nprint(숫자 또는 변수)',note:'글자는 따옴표로 감싸고, 이미 값이 든 변수는 이름만 씁니다.',pitfall:'글자를 따옴표 없이 쓰면 파이썬은 변수 이름으로 해석합니다.'},
+    '변수':{title:'값에 이름을 붙여 다시 쓰기',pattern:'이름 = 값\nprint(이름)',note:'=은 값을 저장한다는 뜻입니다. 오른쪽 값을 먼저 만든 뒤 왼쪽 이름에 담습니다.',pitfall:'변수 이름을 글자처럼 출력하려면 따옴표가 필요하지만, 변수의 값을 출력할 때는 따옴표를 쓰지 않습니다.'},
+    '입력':{title:'사용자 입력을 값으로 받기',pattern:'이름 = input()\n숫자 = int(input())',note:'문장용 입력은 그대로, 계산용 입력은 int() 또는 float()로 바꿉니다.',pitfall:'input() 결과는 기본적으로 문자열이라는 점을 놓치기 쉽습니다.'},
+    '연산':{title:'값을 계산해 새 결과 만들기',pattern:'결과 = 값1 + 값2\n결과 = 값1 * 값2\nprint(결과)',note:'문제의 말(더하기·곱하기·나머지·이상)을 연산자와 비교식으로 옮겨 봅니다.',pitfall:'나눗셈 결과의 자료형과 연산 순서를 괄호로 점검합니다.'},
+    '조건문':{title:'조건에 따라 다른 코드 실행하기',pattern:'if 조건:\n    실행할 코드\nelse:\n    다른 코드',note:'조건이 참일 때와 거짓일 때를 먼저 한국어로 나누어 본 뒤 코드로 옮깁니다.',pitfall:'if 줄 끝의 :과 다음 줄 들여쓰기는 문법의 일부입니다.'},
+    '반복문':{title:'여러 값을 하나씩 처리하기',pattern:'for 항목 in 목록:\n    반복할 코드',note:'반복 대상, 하나씩 받을 변수, 반복 안에서 할 일을 분리해 생각합니다.',pitfall:'반복문 안에서 실행할 코드는 반드시 한 단계 들여써야 합니다.'},
+    '리스트':{title:'여러 값을 순서대로 보관하기',pattern:'목록 = [값1, 값2, 값3]\n첫번째 = 목록[0]',note:'리스트의 위치 번호(인덱스)는 0부터 시작합니다.',pitfall:'첫 번째 값을 목록[1]로 접근하는 오프바이원 실수를 조심합니다.'},
+    '튜플':{title:'순서가 있는 묶음에서 값 꺼내기',pattern:'좌표 = (x, y)\nx값 = 좌표[0]',note:'튜플도 인덱스는 0부터 시작하며, 보통 바꾸지 않을 값을 묶을 때 씁니다.',pitfall:'튜플은 생성 뒤 원소를 바꾸려 하면 오류가 납니다.'},
+    '딕셔너리':{title:'이름표(키)로 정보 찾기',pattern:'학생 = {"이름": "값", "점수": 0}\n점수 = 학생["점수"]',note:'순서가 아니라 키 이름으로 값을 찾습니다.',pitfall:'키는 대소문자와 띄어쓰기까지 정확히 일치해야 합니다.'},
+    '함수':{title:'반복할 로직을 이름 붙여 재사용하기',pattern:'def 함수이름(매개변수):\n    return 결과\n\n결과값 = 함수이름(값)',note:'정의할 때는 매개변수, 사용할 때는 인자를 넣는다는 차이를 기억합니다.',pitfall:'함수 몸체의 들여쓰기와 return 위치를 먼저 확인합니다.'},
+  }
+  return byUnit[lesson.unit??'']??{title:'문제를 작은 단계로 나누기',pattern:'# 값 준비하기\n# 처리하기\n# 결과 출력하기',note:'문제의 입력·처리·출력을 나누면 코드의 목적이 분명해집니다.',pitfall:'한 번에 완성하려 하기보다 각 단계의 실행 결과를 먼저 확인합니다.'}
 }
 
 export default function AppStudio(){
@@ -128,7 +154,7 @@ export default function AppStudio(){
       </section>}
       {page==='studio'&&<section className="learning-studio">
         <aside className="course-panel"><div className="course-panel-head"><span>LEARNING COURSE</span><h2>레벨별 코스</h2><p>제목을 누르면 오른쪽 실습 문제가 바뀝니다.</p></div>{levels.map((items,index)=>items.length>0&&<details key={index} open={levelOf(lesson)===index+1}><summary><span>LEVEL {String(index+1).padStart(2,'0')}</span><strong>{levelName(index+1)}</strong><small>{items.filter(item=>done.includes(item.id)).length}/{items.length}</small></summary>{items.map(item=><button key={item.id} className={item.id===lesson.id?'selected':''} onClick={()=>choose(item)}><b>{done.includes(item.id)?'✓':item.order}</b><span>{item.title}<small>{item.unit}</small></span></button>)}</details>)}</aside>
-        <div className="lesson-panel"><div className="selected-head"><span>LEVEL {levelOf(lesson)} · {lesson.unit}</span><h2>{lesson.title}</h2><p>{lesson.summary}</p></div><details className="concept-details"><summary><span>개념 설명</span><b>열기 +</b></summary><div><h3>무엇을 배우나요?</h3><p>{lesson.concept}</p><h3>왜 배울까요?</h3><p>{lesson.why}</p><section className="solve-plan"><h3>문제 풀기 전 체크</h3><ol>{conceptSteps(lesson).map((step,index)=><li key={step}><b>{index+1}</b><span>{step}</span></li>)}</ol><p className="answer-note">문제와 같은 완성 코드는 여기서 보여주지 않아요. 막힐 때는 힌트로 한 단계씩 확인해 보세요.</p></section></div></details>
+        <div className="lesson-panel"><div className="selected-head"><span>LEVEL {levelOf(lesson)} · {lesson.unit}</span><h2>{lesson.title}</h2><p>{lesson.summary}</p></div><details className="concept-details"><summary><span>개념 설명</span><b>열기 +</b></summary><div>{(()=>{const reference=conceptReference(lesson);return <><section className="concept-intro"><p className="concept-eyebrow">핵심 원리</p><h3>{reference.title}</h3><p>{lesson.concept}</p><p className="concept-why">{lesson.why}</p></section><div className="concept-grid"><section className="concept-block"><p className="concept-eyebrow">문법 구조</p><pre className="syntax-pattern"><code>{reference.pattern}</code></pre><p>{reference.note}</p></section><section className="concept-block pitfall"><p className="concept-eyebrow">자주 막히는 지점</p><p>{reference.pitfall}</p></section></div><section className="solve-plan"><p className="concept-eyebrow">문제 풀이 순서</p><ol>{conceptSteps(lesson).map((step,index)=><li key={step}><b>{index+1}</b><span>{step}</span></li>)}</ol><p className="answer-note">위 문법 구조는 원리를 익히기 위한 예시입니다. 현재 문제의 완성 답안은 보여주지 않아요.</p></section></>})()}</div></details>
           <article className="practice-card"><span>CODE PRACTICE</span><h3>{lesson.prompt}</h3><label htmlFor="code">코드 작성</label><textarea id="code" value={code} onChange={event=>{setCode(event.target.value);setResult(null);setRunResult(null)}} spellCheck="false" autoCapitalize="off" autoCorrect="off" autoComplete="off"/><div className="code-meta"><span>Python</span><span>UTF-8</span></div><div className="practice-actions"><button className="run" onClick={()=>void run()} disabled={loading}>{loading?'실행 중...':'▷ 실행하기'}</button><button className="grade" onClick={()=>void check()} disabled={loading}>✓ 채점하기</button><button className="hint" onClick={()=>setHint(Math.min(hint+1,lesson.hints.length))}>💡 힌트 {hint?`${hint}/${lesson.hints.length}`:'보기'}</button>{lesson.solution&&<button className="grade" onClick={()=>void showSolution()}>◫ 풀이·해설 보기</button>}</div>
           {runResult&&<div className={`terminal ${runResult.success?'':'error'}`}><header><span><i/><i/><i/> Python Console</span><small>{runResult.success?'실행 완료':'실행 오류'}</small></header><pre>{runResult.success?`>>> 실행 결과\n${runResult.output||'(출력 없음)'}`:`>>> 실행 실패\n${runResult.error}`}</pre></div>}{hint>0&&<div className="hint-card"><strong>힌트 {hint}</strong><p>{lesson.hints[hint-1]}</p></div>}{solutionOpen&&lesson.solution&&<div className="hint-card"><strong>풀이·해설</strong><pre style={{margin:'9px 0',padding:10,borderRadius:6,background:'#252c42',color:'#edf1ff',fontSize:11,whiteSpace:'pre-wrap'}}>{lesson.solution}</pre><p>{lesson.solutionExplanation}</p>{solutionNotice&&<p style={{color:'#6270c9',fontWeight:700}}>{solutionNotice}</p>}</div>}{result&&<div className={`result-card ${result.correct?'success':''}`}><strong>{result.executionError?'실행 오류를 먼저 해결해 볼까요?':result.correct?'정답입니다! 잘했어요. 🎉':'조금만 더 생각해 볼까요?'}</strong><p>{result.feedback}</p>{result.output&&<pre>실행 결과: {result.output}</pre>}</div>}</article>
         </div>
