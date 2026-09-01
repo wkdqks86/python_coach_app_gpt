@@ -12,6 +12,7 @@ import uuid
 from contextlib import redirect_stdout
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -233,7 +234,7 @@ def current_user(
     x_pycoach_nickname: str = Header(default=""),
     x_pycoach_access_code: str = Header(default=""),
 ) -> dict[str, str]:
-    _, nickname_key = normalize_nickname(x_pycoach_nickname)
+    _, nickname_key = normalize_nickname(unquote(x_pycoach_nickname))
     if not re.fullmatch(r"\d{6}", x_pycoach_access_code):
         raise HTTPException(401, "닉네임 또는 접속 코드를 확인해 주세요.")
     with database() as connection:

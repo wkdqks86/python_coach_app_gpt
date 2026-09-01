@@ -99,7 +99,7 @@ export default function AppStudio(){
         const lessonResponse=await fetch(`${API}/lessons`)
         if(lessonResponse.ok)setLessons(await lessonResponse.json())
         if(!access)return
-        const headers={'X-PyCoach-Nickname':access.nickname,'X-PyCoach-Access-Code':access.accessCode}
+        const headers={'X-PyCoach-Nickname':encodeURIComponent(access.nickname),'X-PyCoach-Access-Code':access.accessCode}
         const [progressResponse,reviewResponse,mistakeResponse,todayResponse]=await Promise.all([fetch(`${API}/progress`,{headers}),fetch(`${API}/reviews/due`,{headers}),fetch(`${API}/mistakes`,{headers}),fetch(`${API}/today`,{headers})])
         if(progressResponse.ok){const data=await progressResponse.json();setDone(data.completedIds);localStorage.setItem('pycoach-completed',JSON.stringify(data.completedIds))}
         if(reviewResponse.ok)setReviews((await reviewResponse.json()).lessons)
@@ -122,7 +122,7 @@ export default function AppStudio(){
 
   function apiFetch(path:string, init:RequestInit={}){
     if(!access)throw new Error('사용자 정보가 없어요.')
-    return fetch(`${API}${path}`,{...init,headers:{...init.headers,'X-PyCoach-Nickname':access.nickname,'X-PyCoach-Access-Code':access.accessCode}})
+    return fetch(`${API}${path}`,{...init,headers:{...init.headers,'X-PyCoach-Nickname':encodeURIComponent(access.nickname),'X-PyCoach-Access-Code':access.accessCode}})
   }
   async function submitAccess(){
     setAuthError('')
