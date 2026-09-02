@@ -37,7 +37,12 @@ const conceptSteps=(lesson:Lesson)=>{
     'study-check-mission':['입력한 글자를 변수에 저장합니다.','특정 글자와 같은 경우, 그렇지 않은 경우의 행동을 나눠 생각합니다.'],
     'average-study-minutes':['합계를 담을 변수를 0에서 시작합니다.','목록을 모두 더한 뒤 항목 수로 나누는 순서로 계산합니다.'],
     'student-average-mission':['목록에서 항목 하나를 꺼내 그 안의 점수를 찾습니다.','반복으로 합계를 만든 뒤 항목 수로 나눕니다.'],
-    'student-average-function-mission':['함수는 학생 목록을 받아야 하고, 평균값을 돌려줘야 합니다.','함수 안에서 점수를 합친 뒤 목록 길이로 나누는 순서를 설계합니다.'],
+    'function-first':['먼저 def와 함수 이름 say_hello 뒤에 빈 괄호와 :를 씁니다.','함수 안에서 실행할 print()를 한 단계 들여씁니다.','정의를 끝낸 뒤, 함수 밖에서 say_hello()를 호출합니다.','정의만 하면 실행되지 않으므로 호출 결과가 출력되는지 확인합니다.'],
+    'function-parameter':['greet 함수가 받을 값의 이름을 괄호 안에 name으로 정합니다.','함수 안에서는 name을 이용해 “님, 반가워요!”가 붙은 문장을 만듭니다.','함수 밖에서 greet("피터")를 호출해 name에 어떤 값이 들어가는지 확인합니다.','출력 문장이 문제의 문장과 공백·조사까지 같은지 확인합니다.'],
+    'function-return':['add 함수가 받을 두 값 first와 second를 정합니다.','함수 안에서 두 값을 더한 결과를 return으로 돌려줍니다.','add(12, 8)의 반환값을 print()에 넣어 화면에 출력합니다.','return과 print의 역할이 다르다는 점을 확인합니다.'],
+    'function-count-pass':['주어진 scores 목록을 그대로 두고 count_passing 함수가 목록을 받게 합니다.','count를 0으로 시작하고 for문으로 점수를 하나씩 꺼냅니다.','점수가 70 이상일 때만 count를 1 늘립니다.','반복이 끝난 뒤 count를 return하고, 주어진 목록의 결과 2를 출력합니다.'],
+    'function-average':['주어진 scores 목록을 매개변수로 받아 함수 안에서 total을 0으로 시작합니다.','for문으로 모든 점수를 total에 더합니다.','total을 len(scores)로 나눈 값을 return합니다.','calculate_average(scores)를 호출해 결과 85.0을 출력합니다.'],
+    'student-average-function-mission':['주어진 students 목록을 함수의 매개변수로 받고 total을 0으로 시작합니다.','for문으로 학생 한 명씩 꺼낸 뒤 student["score"]로 점수를 찾습니다.','찾은 점수를 total에 더하고, 전체 학생 수 len(students)로 나눈 값을 return합니다.','calculate_student_average(students)를 호출해 주어진 두 학생의 평균 85.0을 출력합니다.'],
   }
   if(missionSteps[lesson.id])return missionSteps[lesson.id]
   const unitSteps:Record<string,string[]>={
@@ -62,7 +67,12 @@ const conceptReference=(lesson:Lesson):ConceptReference=>{
     'study-check-mission':{title:'입력에 따라 갈라지는 흐름',pattern:'답 = input()\nif 답 == "기준값":\n    print("참일 때")\nelse:\n    print("거짓일 때")',note:'비교는 ==, 조건문 줄 끝에는 :를 사용합니다.',pitfall:'조건문 아래 실행문은 반드시 한 단계 들여써야 합니다.'},
     'average-study-minutes':{title:'반복으로 평균 만들기',pattern:'합계 = 0\nfor 값 in 목록:\n    합계 += 값\n평균 = 합계 / len(목록)',note:'합계 → 반복 → 나누기의 순서를 먼저 세우면 복잡한 문제도 풀기 쉬워집니다.',pitfall:'합계를 0으로 시작하지 않거나 반복문 밖에서 더하면 원하는 결과가 나오지 않습니다.'},
     'student-average-mission':{title:'중첩 데이터에서 값 꺼내기',pattern:'for 학생 in 학생목록:\n    점수 = 학생["점수"]\n    # 점수를 합계에 더하기',note:'목록에서는 한 명씩, 딕셔너리에서는 키로 필요한 정보를 찾습니다.',pitfall:'목록의 순서와 딕셔너리의 키 접근을 섞어 쓰지 않도록 구분합니다.'},
-    'student-average-function-mission':{title:'함수로 평균 계산을 묶기',pattern:'def 평균_계산(값목록):\n    합계 = 0\n    # 합계를 만든 뒤 평균 반환\n    return 결과',note:'함수는 입력(매개변수)과 출력(return)을 함께 설계합니다.',pitfall:'return을 함수 밖에 두거나 호출만 하고 결과를 사용하지 않는 실수를 조심합니다.'},
+    'function-first':{title:'정의와 호출은 서로 다른 두 단계',pattern:'def say_hello():\n    # 이 안은 호출할 때 실행\n\nsay_hello()  # 여기서 실제 실행',note:'def는 함수를 “만드는” 단계이고, say_hello()는 만들어 둔 함수를 “실행하는” 단계입니다.',pitfall:'함수를 정의만 하고 호출하지 않으면 화면에는 아무것도 출력되지 않습니다.'},
+    'function-parameter':{title:'호출한 값이 매개변수로 들어오는 흐름',pattern:'def greet(name):\n    # name을 넣어 인사 문장 출력\n\ngreet("피터")  # name에 "피터" 전달',note:'name은 함수 안에서만 쓰는 빈 상자입니다. 호출할 때 넣은 "피터"가 그 상자에 들어옵니다.',pitfall:'greet("피터")를 쓰지 않거나, 출력에서 name 대신 "name"을 따옴표로 쓰면 원하는 문장이 나오지 않습니다.'},
+    'function-return':{title:'계산 결과를 돌려주고 출력하는 흐름',pattern:'def add(first, second):\n    # 두 값을 계산한 결과를 return\n\nresult = add(12, 8)\nprint(result)',note:'return은 계산 결과를 함수 호출 자리로 보내고, print는 그 값을 화면에 보여 줍니다.',pitfall:'함수 안에서 print만 하면 결과를 다른 코드에서 재사용하기 어렵습니다. 이 문제에서는 return이 핵심입니다.'},
+    'function-count-pass':{title:'목록을 받아 조건에 맞는 항목 세기',pattern:'def count_passing(scores):\n    count = 0\n    for score in scores:\n        if score >= 70:\n            # count를 1 증가\n    return count',note:'count는 조건을 만족한 횟수를 기억하는 상자입니다. 반복이 끝난 뒤에 return해야 전체 개수가 돌아옵니다.',pitfall:'return을 if문이나 for문 안에 넣으면 첫 점수만 확인하고 함수가 너무 일찍 끝납니다.'},
+    'function-average':{title:'합계에서 평균까지의 함수 흐름',pattern:'def calculate_average(scores):\n    total = 0\n    for score in scores:\n        # total에 score 더하기\n    return total / len(scores)',note:'목록이 바뀌어도 total을 모두 더한 뒤 항목 수로 나누는 규칙은 같습니다.',pitfall:'len(scores) 대신 고정된 숫자로 나누면 점수 개수가 달라질 때 평균이 틀어집니다.'},
+    'student-average-function-mission':{title:'학생 딕셔너리 목록을 함수로 분석하기',pattern:'def calculate_student_average(students):\n    total = 0\n    for student in students:\n        score = student["score"]\n        # total에 score 더하기\n    return total / len(students)',note:'students는 목록, student는 한 명의 딕셔너리, student["score"]는 그 학생의 점수입니다. 세 단계를 구분하면 중첩 데이터도 읽기 쉬워집니다.',pitfall:'student 자체를 더하면 딕셔너리는 숫자가 아니라는 오류가 납니다. 반드시 ["score"]로 숫자 값을 꺼내야 합니다.'},
   }
   if(missions[lesson.id])return missions[lesson.id]
   const byUnit:Record<string,ConceptReference>={

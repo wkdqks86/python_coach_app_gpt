@@ -99,6 +99,9 @@ def final_hint(lesson: dict) -> str:
 def lesson_for_client(lesson: dict) -> dict:
     """Keep full answers separate from the progressive hint ladder."""
     client_lesson = dict(lesson)
+    # Hidden test cases belong only on the server; exposing them would make it easy
+    # to tailor an answer to the checker instead of practising a reusable function.
+    client_lesson.pop("functionRequirements", None)
     hints = list(lesson.get("hints", []))
     if len(hints) >= 3:
         solution = hints[2]
@@ -480,7 +483,8 @@ def mistake_lessons(user_id: str) -> list[dict]:
             "lastAttemptAt": "해설 확인",
         })
     return mistakes
-def run_safe_code(code: str, inputs: list[str]) -> str:
+def execute_safe_code(code: str, inputs: list[str]) -> tuple[str, dict[str, object]]:
+    """Run allowed learner code and keep its namespace for hidden function tests."""
     tree = ast.parse(code, mode="exec")
     allowed = (
         ast.Module, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
@@ -507,9 +511,16 @@ def run_safe_code(code: str, inputs: list[str]) -> str:
 
     output = io.StringIO()
     safe_builtins = {"print": print, "input": learner_input, "int": int, "float": float, "str": str, "range": range, "len": len}
+    namespace: dict[str, object] = {"__builtins__": safe_builtins}
     with redirect_stdout(output):
-        exec(compile(tree, "<learner-code>", "exec"), {"__builtins__": safe_builtins})
-    return output.getvalue().rstrip("\n")
+        exec(compile(tree, "<learner-code>", "exec"), namespace)
+    return output.getvalue().rstrip("\n"), namespace
+
+
+def run_safe_code(code: str, inputs: list[str]) -> str:
+    """Run code for the Execute button, where only screen output is needed."""
+    output, _ = execute_safe_code(code, inputs)
+    return output
 
 
 def execution_error_message(error: Exception) -> str:
@@ -568,15 +579,88 @@ def run_code(request: RunRequest) -> dict[str, object]:
     return {"success": True, "output": output, "error": ""}
 
 
+def function_contract_feedback(code: str, requirements: dict[str, object]) -> str | None:
+    """Check the minimum function structure without exposing a full solution.
+
+    Output alone can be copied with a print() statement.  For function lessons we
+    also inspect Python's syntax tree (AST) to confirm that the intended building
+    blocks, such as def, return, for, and if, are actually present.
+    """
+    tree = ast.parse(code, mode="exec")
+    function_name = str(requirements["name"])
+    function_node = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == function_name
+        ),
+        None,
+    )
+    if function_node is None:
+        return f"먼저 def {function_name}(...)로 함수를 정의해 보세요."
+
+    expected_parameter_count = requirements.get("parameterCount")
+    if expected_parameter_count is not None and len(function_node.args.args) != expected_parameter_count:
+        return f"{function_name} 함수의 매개변수 개수를 문제에서 요구한 형태로 확인해 보세요."
+
+    expected_parameter_names = requirements.get("parameterNames")
+    actual_parameter_names = [argument.arg for argument in function_node.args.args]
+    if expected_parameter_names is not None and actual_parameter_names != expected_parameter_names:
+        return f"{function_name} 함수의 매개변수 이름을 문제에서 제시한 이름으로 확인해 보세요."
+
+    nodes = tuple(ast.walk(function_node))
+    structure_checks: tuple[tuple[str, type[ast.AST], str], ...] = (
+        ("requiresReturn", ast.Return, "계산한 결과를 함수 밖으로 돌려주려면 return이 필요해요."),
+        ("requiresFor", ast.For, "점수나 학생 목록을 하나씩 확인하려면 for문이 필요해요."),
+        ("requiresIf", ast.If, "70점 이상인지 판단하는 if 조건문을 함수 안에 넣어 보세요."),
+    )
+    for requirement_key, node_type, feedback in structure_checks:
+        if requirements.get(requirement_key) and not any(isinstance(node, node_type) for node in nodes):
+            return feedback
+    return None
+
+
+def function_behavior_feedback(namespace: dict[str, object], requirements: dict[str, object]) -> str | None:
+    """Call the learner's function with an extra case to check real reusability."""
+    function_name = str(requirements["name"])
+    learner_function = namespace.get(function_name)
+    if not callable(learner_function):
+        return f"{function_name} 함수를 다시 확인해 보세요."
+
+    for test_case in requirements.get("testCases", []):
+        arguments = test_case.get("args", [])
+        captured_output = io.StringIO()
+        try:
+            with redirect_stdout(captured_output):
+                return_value = learner_function(*arguments)
+        except Exception:
+            return "함수를 다른 값으로 호출했을 때도 동작하도록, 매개변수와 함수 안의 변수를 다시 확인해 보세요."
+
+        if "expectedOutput" in test_case:
+            actual_value = captured_output.getvalue().rstrip("\n")
+            expected_value = test_case["expectedOutput"]
+        else:
+            actual_value = return_value
+            expected_value = test_case["expectedReturn"]
+        if actual_value != expected_value:
+            return "함수를 다른 값으로도 호출해 보세요. 함수 안에 고정된 값 대신 매개변수와 목록을 사용해야 합니다."
+    return None
+
+
 @app.post("/api/check")
 def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
     lesson=next((x for x in LESSONS if x["id"]==request.lessonId),None)
     if not lesson:return {"correct":False,"output":"","feedback":"레슨 정보를 찾지 못했어요."}
-    try: output=run_safe_code(request.code, lesson.get("inputs", []))
+    try: output, namespace = execute_safe_code(request.code, lesson.get("inputs", []))
     except Exception as error:
         # Syntax/runtime errors are part of experimenting, not an incorrect answer.
         return {"correct":False,"executionError":True,"output":"","feedback":execution_error_message(error)}
-    correct = bool(output.strip()) if lesson.get("checkType") == "non_empty_output" else output == lesson["expectedOutput"]
+    contract_feedback = None
+    if lesson.get("functionRequirements"):
+        contract_feedback = function_contract_feedback(request.code, lesson["functionRequirements"])
+        if contract_feedback is None:
+            contract_feedback = function_behavior_feedback(namespace, lesson["functionRequirements"])
+    correct = (bool(output.strip()) if lesson.get("checkType") == "non_empty_output" else output == lesson["expectedOutput"]) and contract_feedback is None
     feedback = (
         "이름을 잘 출력했어요! 글자는 따옴표로 감싸는 것을 기억해 주세요."
         if correct and lesson.get("checkType") == "non_empty_output"
@@ -584,6 +668,8 @@ def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_use
         if lesson.get("checkType") == "non_empty_output"
         else "기대한 결과가 정확히 나왔어요. 다음 레슨도 도전해 볼까요?"
         if correct
+        else contract_feedback
+        if contract_feedback
         else "실행 결과를 문제에서 요구한 문장과 비교해 보세요. 힌트를 한 단계 확인해도 좋아요."
     )
     next_review = record_attempt(user["id"], lesson["id"], request.code, output, correct, request.hintLevel)
