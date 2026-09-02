@@ -73,12 +73,22 @@ def new_access_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def scaffold_hint(solution: str) -> str:
-    """Turn a complete answer into a syntax-preserving, fill-in-the-blank hint."""
-    strings = r'(?:[fFrRbBuU]{0,2})?(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'
-    scaffold = re.sub(strings, "________", solution)
-    scaffold = re.sub(r"\b\d+(?:\.\d+)?\b", "____", scaffold)
-    return "아래 코드 뼈대의 빈칸을 채워 보세요. 구조와 들여쓰기를 먼저 확인해요.\n\n" + scaffold
+def final_hint(lesson: dict) -> str:
+    """Give a final reasoning cue without exposing an answer-shaped code skeleton."""
+    by_unit = {
+        "출력": "문제에서 화면에 보여 줄 문장을 다시 읽고, 글자 전체를 따옴표로 감싸야 하는지 확인해 보세요.",
+        "변수": "어떤 값에 이름을 붙일지, 그 이름을 어디에서 다시 사용할지를 문제 문장에 표시해 보세요.",
+        "입력": "입력받은 값을 문장에 쓸지 계산에 쓸지 먼저 정하세요. 계산한다면 숫자로 바꾸는 단계가 필요합니다.",
+        "연산": "문제의 말(이상·나누기·더하기)을 각각 비교 연산자나 계산 연산자로 바꿔 적어 보세요.",
+        "조건문": "참일 때와 거짓일 때의 행동을 한국어로 두 줄로 나눈 뒤, 조건식·콜론·들여쓰기 순서로 옮겨 보세요.",
+        "반복문": "반복할 대상, 하나씩 꺼낼 이름, 반복할 일을 따로 적은 뒤 for문으로 연결해 보세요.",
+        "리스트": "원하는 값이 몇 번째인지 먼저 세고, 파이썬의 인덱스는 0부터 시작한다는 점을 적용해 보세요.",
+        "튜플": "튜플에서 꺼낼 위치를 0부터 세고, 꺼낸 값을 어떤 계산에 쓸지 정해 보세요.",
+        "딕셔너리": "필요한 정보의 키 이름을 확인한 뒤, 키로 값을 꺼내 문장 또는 계산에 연결해 보세요.",
+        "함수": "함수가 받을 값, 함수 안에서 할 일, 돌려줄 결과를 순서대로 적은 뒤 정의와 호출을 나눠 작성해 보세요.",
+        "미니 미션": "문제를 입력·값 저장·처리·출력의 네 단계로 나눈 뒤, 이미 배운 문법을 필요한 순서로 조합해 보세요.",
+    }
+    return "마지막 힌트\n\n" + by_unit.get(lesson.get("unit", ""), "문제의 입력·처리·출력 순서를 먼저 정리한 뒤 한 줄씩 작성해 보세요.")
 
 
 def lesson_for_client(lesson: dict) -> dict:
@@ -87,7 +97,7 @@ def lesson_for_client(lesson: dict) -> dict:
     hints = list(lesson.get("hints", []))
     if len(hints) >= 3:
         solution = hints[2]
-        hints[2] = scaffold_hint(solution)
+        hints[2] = final_hint(lesson)
         client_lesson["solution"] = solution
         client_lesson["solutionExplanation"] = "풀이를 본 뒤에는 각 줄이 맡은 역할을 말로 설명해 보고, 코드를 지운 뒤 다시 직접 작성해 보세요."
     client_lesson["hints"] = hints

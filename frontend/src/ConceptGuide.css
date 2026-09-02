@@ -168,6 +168,26 @@
   outline: none;
 }
 
+.next-lesson {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 7px;
+  background: #4f8f67;
+  padding: 9px 12px;
+  color: #fff;
+  font: 700 12px Pretendard, "Noto Sans KR", sans-serif;
+  cursor: pointer;
+}
+
+.next-lesson:hover,
+.next-lesson:focus-visible {
+  background: #397b51;
+  outline: 2px solid #b9e1c7;
+  outline-offset: 2px;
+}
+
 @media (max-width: 740px) {
   .concept-details summary {
     min-height: 54px;
@@ -196,5 +216,12 @@
     min-height: 28px;
     padding: 4px 9px;
     font-size: 11px;
+  }
+
+  .next-lesson {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    font-size: 13px;
   }
 }
