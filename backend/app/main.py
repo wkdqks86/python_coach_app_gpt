@@ -102,6 +102,9 @@ def lesson_for_client(lesson: dict) -> dict:
     # Hidden test cases belong only on the server; exposing them would make it easy
     # to tailor an answer to the checker instead of practising a reusable function.
     client_lesson.pop("functionRequirements", None)
+    # 문법 구조와 추가 입력값 검사는 채점용 정보입니다. 브라우저로 보내지
+    # 않아야 특정 값만 겨냥한 코드를 작성하는 대신, 원리를 연습하게 됩니다.
+    client_lesson.pop("codeRequirements", None)
     hints = list(lesson.get("hints", []))
     if len(hints) >= 3:
         solution = hints[2]
@@ -647,6 +650,92 @@ def function_behavior_feedback(namespace: dict[str, object], requirements: dict[
     return None
 
 
+def code_contract_feedback(code: str, requirements: dict[str, object]) -> str | None:
+    """Confirm that a practice problem uses the syntax it is teaching.
+
+    초급 문제도 결과만 print()로 적으면 맞힐 수 있습니다. 이 검사는 정답
+    문장을 외우는 대신, 해당 레슨의 변수·조건문·반복문 같은 핵심 문법을
+    실제로 사용했는지 확인합니다.
+    """
+    tree = ast.parse(code, mode="exec")
+    nodes = tuple(ast.walk(tree))
+    assigned_names = {
+        node.id
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    }
+    calls = [
+        node.func.id
+        for node in nodes
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+
+    for variable_name in requirements.get("requiredVariableNames", []):
+        if variable_name not in assigned_names:
+            return f"문제에서 제시한 {variable_name} 변수에 값을 먼저 저장해 보세요."
+
+    for call_name in requirements.get("requiredCalls", []):
+        if call_name not in calls:
+            return f"이 문제에서는 {call_name}()을 사용해 보는 것이 핵심이에요."
+
+    for call_name, minimum_count in requirements.get("minimumCallCounts", {}).items():
+        if calls.count(call_name) < minimum_count:
+            return f"{call_name}()을 {minimum_count}번 사용해 각 값을 따로 받아 보세요."
+
+    required_node_types: dict[str, tuple[type[ast.AST], str]] = {
+        "if": (ast.If, "조건에 따라 다르게 실행하려면 if문이 필요해요."),
+        "for": (ast.For, "목록이나 범위를 하나씩 처리하려면 for문이 필요해요."),
+        "list": (ast.List, "이 문제의 여러 값을 담으려면 리스트 [ ]를 사용해 보세요."),
+        "tuple": (ast.Tuple, "좌표처럼 함께 유지할 값은 튜플 ( )로 묶어 보세요."),
+        "dict": (ast.Dict, "이름표와 값을 연결하려면 딕셔너리 { }를 사용해 보세요."),
+        "subscript": (ast.Subscript, "목록이나 딕셔너리에서 필요한 값을 [ ]로 꺼내 보세요."),
+        "fString": (ast.JoinedStr, "문장 안에 값을 넣을 때는 f 문자열을 사용해 보세요."),
+    }
+    for requirement_name in requirements.get("requiredSyntax", []):
+        node_type, feedback = required_node_types[requirement_name]
+        if not any(isinstance(node, node_type) for node in nodes):
+            return feedback
+
+    if requirements.get("requiresElse") and not any(
+        isinstance(node, ast.If) and node.orelse for node in nodes
+    ):
+        return "조건이 거짓일 때의 결과도 만들 수 있도록 else를 추가해 보세요."
+
+    if requirements.get("requiresSubscriptAssignment") and not any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Subscript) for target in node.targets)
+        for node in nodes
+    ):
+        return "리스트의 두 번째 값을 바꾸려면 scores[1] = 95처럼 위치에 대입해 보세요."
+
+    operator_types: dict[str, tuple[type[ast.AST], str]] = {
+        "add": (ast.Add, "+ 연산자로 값을 더하거나 글자를 이어 보세요."),
+        "multiply": (ast.Mult, "가격과 수량을 곱하려면 * 연산자가 필요해요."),
+        "divide": (ast.Div, "평균을 구하려면 / 연산자로 나누어 보세요."),
+        "modulo": (ast.Mod, "홀짝을 확인하려면 % 연산자로 나머지를 구해 보세요."),
+        "greaterOrEqual": (ast.GtE, "이상인지 비교할 때는 >=를 사용해 보세요."),
+        "greater": (ast.Gt, "초과인지 비교할 때는 >를 사용해 보세요."),
+        "equal": (ast.Eq, "같은지 비교할 때는 ==를 사용해 보세요."),
+    }
+    for operator_name in requirements.get("requiredOperators", []):
+        operator_type, feedback = operator_types[operator_name]
+        if not any(isinstance(node, operator_type) for node in nodes):
+            return feedback
+    return None
+
+
+def code_behavior_feedback(code: str, requirements: dict[str, object]) -> str | None:
+    """Run input-based practice code with another case kept on the server."""
+    for test_case in requirements.get("testCases", []):
+        try:
+            output = run_safe_code(code, test_case["inputs"])
+        except Exception:
+            return "다른 입력값에서도 실행되도록 input()으로 받은 값과 계산 과정을 다시 확인해 보세요."
+        if output != test_case["expectedOutput"]:
+            return "예시 입력값만이 아니라 다른 값에서도 동작해야 해요. 고정된 결과 대신 입력받은 변수를 사용해 보세요."
+    return None
+
+
 @app.post("/api/check")
 def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
     lesson=next((x for x in LESSONS if x["id"]==request.lessonId),None)
@@ -656,8 +745,12 @@ def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_use
         # Syntax/runtime errors are part of experimenting, not an incorrect answer.
         return {"correct":False,"executionError":True,"output":"","feedback":execution_error_message(error)}
     contract_feedback = None
+    if lesson.get("codeRequirements"):
+        contract_feedback = code_contract_feedback(request.code, lesson["codeRequirements"])
+        if contract_feedback is None:
+            contract_feedback = code_behavior_feedback(request.code, lesson["codeRequirements"])
     if lesson.get("functionRequirements"):
-        contract_feedback = function_contract_feedback(request.code, lesson["functionRequirements"])
+        contract_feedback = contract_feedback or function_contract_feedback(request.code, lesson["functionRequirements"])
         if contract_feedback is None:
             contract_feedback = function_behavior_feedback(namespace, lesson["functionRequirements"])
     correct = (bool(output.strip()) if lesson.get("checkType") == "non_empty_output" else output == lesson["expectedOutput"]) and contract_feedback is None
