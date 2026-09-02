@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import hashlib
 import io
+import math
 import os
+import random
 import re
 import secrets
 import sqlite3
+import sys
 import unicodedata
 import uuid
 from contextlib import redirect_stdout
@@ -91,6 +95,11 @@ def final_hint(lesson: dict) -> str:
         "튜플": "튜플에서 꺼낼 위치를 0부터 세고, 꺼낸 값을 어떤 계산에 쓸지 정해 보세요.",
         "딕셔너리": "필요한 정보의 키 이름을 확인한 뒤, 키로 값을 꺼내 문장 또는 계산에 연결해 보세요.",
         "함수": "함수가 받을 값, 함수 안에서 할 일, 돌려줄 결과를 순서대로 적은 뒤 정의와 호출을 나눠 작성해 보세요.",
+        "함수 설계": "함수의 입력, 기본값 또는 자료형 힌트, 반환값을 차례로 확인해 보세요.",
+        "안전한 입력": "반복을 멈출 조건과 잘못된 입력일 때의 처리를 따로 먼저 적어 보세요.",
+        "표준 라이브러리": "import할 모듈 이름과 그 모듈에서 쓸 기능을 점(.)으로 연결해 보세요.",
+        "클래스": "클래스가 기억할 값은 self.속성에, 그 값을 사용하는 행동은 메서드에 나누어 작성해 보세요.",
+        "모듈": "다른 파일이나 모듈에서 가져올 기능과, 이 파일이 직접 맡을 일을 구분해 보세요.",
         "미니 미션": "문제를 입력·값 저장·처리·출력의 네 단계로 나눈 뒤, 이미 배운 문법을 필요한 순서로 조합해 보세요.",
     }
     return "마지막 힌트\n\n" + by_unit.get(lesson.get("unit", ""), "문제의 입력·처리·출력 순서를 먼저 정리한 뒤 한 줄씩 작성해 보세요.")
@@ -102,6 +111,7 @@ def lesson_for_client(lesson: dict) -> dict:
     # Hidden test cases belong only on the server; exposing them would make it easy
     # to tailor an answer to the checker instead of practising a reusable function.
     client_lesson.pop("functionRequirements", None)
+    client_lesson.pop("classRequirements", None)
     # 문법 구조와 추가 입력값 검사는 채점용 정보입니다. 브라우저로 보내지
     # 않아야 특정 값만 겨냥한 코드를 작성하는 대신, 원리를 연습하게 됩니다.
     client_lesson.pop("codeRequirements", None)
@@ -491,18 +501,66 @@ def execute_safe_code(code: str, inputs: list[str]) -> tuple[str, dict[str, obje
     tree = ast.parse(code, mode="exec")
     allowed = (
         ast.Module, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
-        ast.Assign, ast.If, ast.For, ast.FunctionDef, ast.Return, ast.arguments, ast.arg, ast.List, ast.Tuple, ast.Dict, ast.Subscript, ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod,
-        ast.UnaryOp, ast.UAdd, ast.USub, ast.JoinedStr, ast.FormattedValue,
+        ast.Assign, ast.AugAssign, ast.If, ast.For, ast.While, ast.Try,
+        ast.ExceptHandler, ast.FunctionDef, ast.ClassDef, ast.Return,
+        ast.arguments, ast.arg, ast.List, ast.Tuple, ast.Dict, ast.Subscript,
+        ast.Attribute, ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod,
+        ast.Pow, ast.UnaryOp, ast.UAdd, ast.USub, ast.Not, ast.JoinedStr,
+        ast.FormattedValue, ast.BoolOp, ast.And, ast.Or, ast.Import,
+        ast.ImportFrom, ast.alias, ast.keyword,
         ast.Compare, ast.GtE, ast.Gt, ast.LtE, ast.Lt, ast.Eq, ast.NotEq,
     )
-    function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    allowed_calls = {"print", "input", "int", "float", "str", "range", "len"} | function_names
+    function_names = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    class_names = {
+        node.name for node in tree.body if isinstance(node, ast.ClassDef)
+    }
+    imported_names = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    } | {
+        alias.asname or alias.name.split(".")[0]
+        for node in tree.body
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    allowed_calls = (
+        {"print", "input", "int", "float", "str", "range", "len"}
+        | function_names
+        | class_names
+        | imported_names
+    )
+
+    allowed_imports = {"math", "random", "datetime"}
+
+    def safe_import(name: str, globals_: object = None, locals_: object = None,
+                    fromlist: object = (), level: int = 0) -> object:
+        """Allow only the small standard-library set used in this course."""
+        if name not in allowed_imports or level:
+            raise ValueError("이 레슨에서는 math, random, datetime 모듈만 불러올 수 있어요.")
+        return {"math": math, "random": random, "datetime": sys.modules["datetime"]}[name]
+
     for node in ast.walk(tree):
         if not isinstance(node, allowed):
             raise ValueError("이 레슨에서는 변수, 함수, 리스트·딕셔너리, 반복문, print(), input(), 간단한 계산을 사용해 볼까요?")
-        if isinstance(node, ast.Call) and (not isinstance(node.func, ast.Name) or node.func.id not in allowed_calls):
-            raise ValueError("이 레슨에서는 배운 내장 함수와 직접 정의한 함수만 호출할 수 있어요.")
-        if isinstance(node, ast.Name) and node.id.startswith("__"):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            module_name = node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+            if module_name not in allowed_imports or any(alias.name not in allowed_imports for alias in node.names if isinstance(node, ast.Import)):
+                raise ValueError("이 레슨에서는 math, random, datetime 모듈만 불러올 수 있어요.")
+        if isinstance(node, ast.Call):
+            is_allowed_name_call = isinstance(node.func, ast.Name) and node.func.id in allowed_calls
+            is_allowed_attribute_call = (
+                isinstance(node.func, ast.Attribute)
+                and not node.func.attr.startswith("_")
+            )
+            if not is_allowed_name_call and not is_allowed_attribute_call:
+                raise ValueError("이 레슨에서는 배운 내장 함수와 직접 정의한 함수만 호출할 수 있어요.")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            raise ValueError("특수 기능 대신 배운 문법으로 한 줄씩 작성해 보세요.")
+        if isinstance(node, ast.Name) and node.id.startswith("__") and node.id != "__name__":
             raise ValueError("특수 기능 대신 배운 문법으로 한 줄씩 작성해 보세요.")
 
     input_values = iter(inputs)
@@ -513,10 +571,28 @@ def execute_safe_code(code: str, inputs: list[str]) -> tuple[str, dict[str, obje
             raise ValueError("이 문제에 준비된 입력값을 모두 사용했어요.") from error
 
     output = io.StringIO()
-    safe_builtins = {"print": print, "input": learner_input, "int": int, "float": float, "str": str, "range": range, "len": len}
-    namespace: dict[str, object] = {"__builtins__": safe_builtins}
-    with redirect_stdout(output):
-        exec(compile(tree, "<learner-code>", "exec"), namespace)
+    safe_builtins = {"print": print, "input": learner_input, "int": int, "float": float, "str": str, "range": range, "len": len, "ValueError": ValueError, "ZeroDivisionError": ZeroDivisionError, "__build_class__": builtins.__build_class__, "__import__": safe_import}
+    namespace: dict[str, object] = {"__builtins__": safe_builtins, "__name__": "__main__"}
+
+    # while문을 배우는 동안 실수로 무한 반복을 작성해도 서버가 멈추지 않게
+    # 실행한 줄 수를 제한합니다. 정상적인 초급 문제에는 충분히 큰 횟수입니다.
+    execution_steps = 0
+    previous_trace = sys.gettrace()
+
+    def limit_steps(_frame: object, event: str, _arg: object) -> object:
+        nonlocal execution_steps
+        if event == "line":
+            execution_steps += 1
+            if execution_steps > 10_000:
+                raise ValueError("반복이 너무 오래 계속돼요. while문의 조건과 값 변경을 확인해 보세요.")
+        return limit_steps
+
+    try:
+        sys.settrace(limit_steps)
+        with redirect_stdout(output):
+            exec(compile(tree, "<learner-code>", "exec"), namespace)
+    finally:
+        sys.settrace(previous_trace)
     return output.getvalue().rstrip("\n"), namespace
 
 
@@ -620,6 +696,86 @@ def function_contract_feedback(code: str, requirements: dict[str, object]) -> st
     for requirement_key, node_type, feedback in structure_checks:
         if requirements.get(requirement_key) and not any(isinstance(node, node_type) for node in nodes):
             return feedback
+
+    expected_default_values = requirements.get("defaultValues")
+    if expected_default_values is not None:
+        actual_default_values = [
+            default.value if isinstance(default, ast.Constant) else None
+            for default in function_node.args.defaults
+        ]
+        if actual_default_values != expected_default_values:
+            return f"{function_name} 함수의 기본값을 문제에서 제시한 값으로 확인해 보세요."
+
+    if requirements.get("requiresAnnotations"):
+        has_parameter_annotations = all(argument.annotation is not None for argument in function_node.args.args)
+        if not has_parameter_annotations or function_node.returns is None:
+            return "매개변수와 반환값 뒤에 자료형 힌트를 붙여 보세요. 예: name: str"
+    return None
+
+
+def class_contract_feedback(code: str, requirements: dict[str, object]) -> str | None:
+    """Check an introductory class without requiring an exact answer shape."""
+    tree = ast.parse(code, mode="exec")
+    class_name = str(requirements["name"])
+    class_node = next(
+        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name),
+        None,
+    )
+    if class_node is None:
+        return f"먼저 class {class_name}: 형태로 클래스를 만들어 보세요."
+
+    methods = {
+        node.name: node for node in class_node.body if isinstance(node, ast.FunctionDef)
+    }
+    for method_name in requirements.get("requiredMethods", []):
+        if method_name not in methods:
+            return f"{class_name} 안에 {method_name} 메서드를 만들어 보세요."
+
+    init_parameter_names = requirements.get("initParameterNames")
+    if init_parameter_names is not None:
+        init_method = methods.get("__init__")
+        actual_names = [] if init_method is None else [argument.arg for argument in init_method.args.args[1:]]
+        if actual_names != init_parameter_names:
+            return "__init__의 매개변수 이름과 순서를 문제에서 제시한 형태로 확인해 보세요."
+
+    nodes = tuple(ast.walk(class_node))
+    for attribute_name in requirements.get("requiredAttributes", []):
+        if not any(
+            isinstance(node, ast.Attribute)
+            and node.attr == attribute_name
+            and isinstance(node.ctx, ast.Store)
+            for node in nodes
+        ):
+            return f"객체에 값을 기억시키려면 self.{attribute_name}에 값을 저장해 보세요."
+    if requirements.get("requiresFor") and not any(isinstance(node, ast.For) for node in nodes):
+        return "점수 목록을 하나씩 처리하도록 메서드 안에 for문을 넣어 보세요."
+    if requirements.get("requiresIf") and not any(isinstance(node, ast.If) for node in nodes):
+        return "상태에 따라 결과를 다르게 하도록 메서드 안에 if문을 넣어 보세요."
+    return None
+
+
+def class_behavior_feedback(namespace: dict[str, object], requirements: dict[str, object]) -> str | None:
+    """Run a separate class instance with hidden values to test reusability."""
+    learner_class = namespace.get(str(requirements["name"]))
+    if not callable(learner_class):
+        return "클래스 이름을 다시 확인해 보세요."
+    for test_case in requirements.get("testCases", []):
+        try:
+            instance = learner_class(*test_case.get("constructorArgs", []))
+            method = getattr(instance, test_case["method"])
+            captured_output = io.StringIO()
+            with redirect_stdout(captured_output):
+                return_value = method(*test_case.get("args", []))
+        except Exception:
+            return "다른 값으로 객체를 만들고 메서드를 호출해도 동작하도록 self와 매개변수를 확인해 보세요."
+        if "expectedOutput" in test_case and captured_output.getvalue().rstrip("\n") != test_case["expectedOutput"]:
+            return "메서드를 다른 값으로 호출했을 때의 출력도 확인해 보세요."
+        if "expectedReturn" in test_case and return_value != test_case["expectedReturn"]:
+            return "메서드가 객체에 저장된 값을 사용해 올바른 결과를 돌려주는지 확인해 보세요."
+        if "expectedAttribute" in test_case:
+            attribute, expected_value = test_case["expectedAttribute"]
+            if getattr(instance, attribute, None) != expected_value:
+                return "메서드를 호출한 뒤 객체의 상태가 바뀌는지 self의 속성을 확인해 보세요."
     return None
 
 
@@ -690,6 +846,11 @@ def code_contract_feedback(code: str, requirements: dict[str, object]) -> str | 
         "dict": (ast.Dict, "이름표와 값을 연결하려면 딕셔너리 { }를 사용해 보세요."),
         "subscript": (ast.Subscript, "목록이나 딕셔너리에서 필요한 값을 [ ]로 꺼내 보세요."),
         "fString": (ast.JoinedStr, "문장 안에 값을 넣을 때는 f 문자열을 사용해 보세요."),
+        "while": (ast.While, "반복 조건이 참인 동안 실행하려면 while문이 필요해요."),
+        "try": (ast.Try, "잘못된 입력을 안전하게 처리하려면 try와 except를 사용해 보세요."),
+        "class": (ast.ClassDef, "상태와 동작을 함께 묶으려면 class를 사용해 보세요."),
+        "import": (ast.Import, "다른 모듈의 기능을 쓰려면 import를 작성해 보세요."),
+        "importFrom": (ast.ImportFrom, "필요한 기능만 가져오려면 from ... import ... 형태를 사용해 보세요."),
     }
     for requirement_name in requirements.get("requiredSyntax", []):
         node_type, feedback = required_node_types[requirement_name]
@@ -707,6 +868,35 @@ def code_contract_feedback(code: str, requirements: dict[str, object]) -> str | 
         for node in nodes
     ):
         return "리스트의 두 번째 값을 바꾸려면 scores[1] = 95처럼 위치에 대입해 보세요."
+
+    for module_name in requirements.get("requiredImports", []):
+        has_import = any(
+            (isinstance(node, ast.Import) and any(alias.name == module_name for alias in node.names))
+            or (isinstance(node, ast.ImportFrom) and node.module == module_name)
+            for node in nodes
+        )
+        if not has_import:
+            return f"이 문제에서는 {module_name} 모듈을 먼저 불러와 보세요."
+
+    for attribute_name in requirements.get("requiredAttributeCalls", []):
+        if not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attribute_name
+            for node in nodes
+        ):
+            return f"이 문제에서는 .{attribute_name}() 메서드 또는 함수를 사용해 보세요."
+
+    if requirements.get("requiresMainGuard") and not any(
+        isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and any(
+            isinstance(part, ast.Name) and part.id == "__name__"
+            for part in ast.walk(node.test)
+        )
+        for node in nodes
+    ):
+        return "파일을 직접 실행할 때만 동작하게 하려면 if __name__ == \"__main__\": 구조를 사용해 보세요."
 
     operator_types: dict[str, tuple[type[ast.AST], str]] = {
         "add": (ast.Add, "+ 연산자로 값을 더하거나 글자를 이어 보세요."),
@@ -753,6 +943,10 @@ def check_code(request: CheckRequest, user: dict[str, str] = Depends(current_use
         contract_feedback = contract_feedback or function_contract_feedback(request.code, lesson["functionRequirements"])
         if contract_feedback is None:
             contract_feedback = function_behavior_feedback(namespace, lesson["functionRequirements"])
+    if lesson.get("classRequirements"):
+        contract_feedback = contract_feedback or class_contract_feedback(request.code, lesson["classRequirements"])
+        if contract_feedback is None:
+            contract_feedback = class_behavior_feedback(namespace, lesson["classRequirements"])
     correct = (bool(output.strip()) if lesson.get("checkType") == "non_empty_output" else output == lesson["expectedOutput"]) and contract_feedback is None
     feedback = (
         "이름을 잘 출력했어요! 글자는 따옴표로 감싸는 것을 기억해 주세요."

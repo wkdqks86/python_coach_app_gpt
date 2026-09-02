@@ -29,7 +29,7 @@ const KAGGLE_MODULES:KaggleModule[]=[
   {step:'LAB 5',title:'제출 파일 만들기',minutes:'12분',goal:'Kaggle이 읽을 수 있는 submission.csv를 만듭니다.',concept:'Titanic 제출 파일은 PassengerId와 Survived 두 열을 정확한 이름으로 가져야 합니다. 행의 순서는 test.csv와 같아야 하며, CSV를 저장할 때 index=False를 지정해 불필요한 인덱스 열을 빼야 합니다.',mission:'예측값을 Survived 열에 넣고, test.csv의 PassengerId와 함께 DataFrame을 만든 뒤 submission.csv로 저장해 보세요.',notebookHint:'# test의 PassengerId 유지하기\n# 예측값을 Survived 열로 넣기\n# index 없이 CSV 저장하기',question:'Kaggle Titanic 제출 파일에 반드시 포함해야 하는 두 열은?',choices:[{label:'PassengerId, Survived',value:'submission',explanation:'정답이에요. test.csv의 승객 번호와 모델의 생존 예측값을 이 두 열로 제출합니다.'},{label:'Name, Age',value:'profile',explanation:'이들은 승객 정보이며 제출 형식이 아닙니다.'},{label:'Pclass, Fare',value:'features',explanation:'이들은 모델에 쓸 수 있는 특징이지만 제출 파일의 필수 열은 아닙니다.'}]}
 ]
 const levelOf=(lesson:Lesson)=>lesson.level??(lesson.order<=15?1:lesson.order<=21?2:lesson.order<=27?3:lesson.order<=33?4:5)
-const levelName=(level:number)=>['','파이썬 첫걸음','조건문으로 판단하기','반복으로 데이터 다루기','자료구조로 데이터 묶기','함수로 분석 로직 만들기'][level]??`레벨 ${level}`
+const levelName=(level:number)=>['','파이썬 첫걸음','조건문으로 판단하기','반복으로 데이터 다루기','자료구조로 데이터 묶기','함수로 분석 로직 만들기','함수를 더 잘 설계하기','안전하게 입력받고 처리하기','클래스로 상태 관리하기','모듈로 프로그램 나누기'][level]??`레벨 ${level}`
 const conceptSteps=(lesson:Lesson)=>{
   const missionSteps:Record<string,string[]>={
     'profile-mission':['입력으로 받은 이름과 직접 정할 과목을 서로 다른 변수로 구분합니다.','두 변수의 값을 한 문장에 넣되, 문장 속 고정 문구·공백·조사는 따로 둡니다.','문장을 만들기 전에 최종 출력 문장을 말로 먼저 읽어 봅니다.'],
@@ -56,6 +56,11 @@ const conceptSteps=(lesson:Lesson)=>{
     '튜플':['튜플에서 필요한 위치를 0부터 세어 인덱스로 찾습니다.','꺼낸 값을 계산식에 연결합니다.'],
     '딕셔너리':['찾으려는 정보의 키 이름을 확인합니다.','대괄호 안에 키를 넣어 값을 꺼낸 뒤 문장이나 계산에 사용합니다.'],
     '함수':['함수가 받을 값과 돌려줄 결과를 먼저 정합니다.','정의·들여쓰기·호출 또는 return의 순서를 나눠 확인합니다.'],
+    '함수 설계':['함수의 입력값, 기본값, 반환값을 말로 먼저 정리합니다.','다른 값으로 다시 호출해도 될지 생각한 뒤 함수 안에 고정된 값을 없앱니다.'],
+    '안전한 입력':['반복을 계속할 조건과 멈출 조건을 먼저 나눕니다.','입력 변환이 실패하거나 범위를 벗어난 경우의 안내를 따로 작성합니다.'],
+    '표준 라이브러리':['어떤 모듈에서 어떤 기능을 가져올지 먼저 확인합니다.','import한 기능으로 계산 또는 값을 만든 뒤 결과를 출력합니다.'],
+    '클래스':['객체가 기억할 값은 self.속성으로 정리합니다.','그 속성을 읽거나 바꾸는 행동을 메서드로 분리합니다.'],
+    '모듈':['현재 코드가 맡을 일과 다른 파일로 분리할 일을 구분합니다.','가져올 기능은 import하고, 규칙은 반환값이 있는 함수로 만듭니다.'],
   }
   return unitSteps[lesson.unit??'']??['문제에서 주어진 값과 만들어야 할 결과를 구분합니다.','코드를 작은 단계로 나누어 한 줄씩 작성합니다.']
 }
@@ -86,6 +91,11 @@ const conceptReference=(lesson:Lesson):ConceptReference=>{
     '튜플':{title:'순서가 있는 묶음에서 값 꺼내기',pattern:'좌표 = (x, y)\nx값 = 좌표[0]',note:'튜플도 인덱스는 0부터 시작하며, 보통 바꾸지 않을 값을 묶을 때 씁니다.',pitfall:'튜플은 생성 뒤 원소를 바꾸려 하면 오류가 납니다.'},
     '딕셔너리':{title:'이름표(키)로 정보 찾기',pattern:'학생 = {"이름": "값", "점수": 0}\n점수 = 학생["점수"]',note:'순서가 아니라 키 이름으로 값을 찾습니다.',pitfall:'키는 대소문자와 띄어쓰기까지 정확히 일치해야 합니다.'},
     '함수':{title:'반복할 로직을 이름 붙여 재사용하기',pattern:'def 함수이름(매개변수):\n    return 결과\n\n결과값 = 함수이름(값)',note:'정의할 때는 매개변수, 사용할 때는 인자를 넣는다는 차이를 기억합니다.',pitfall:'함수 몸체의 들여쓰기와 return 위치를 먼저 확인합니다.'},
+    '함수 설계':{title:'입력·처리·반환값을 먼저 정하기',pattern:'def 함수이름(입력값, 기본값=값):\n    # 입력값 처리\n    return 결과',note:'함수 안에 문제의 예시 값만 고정하지 말고, 매개변수로 받은 값을 사용합니다.',pitfall:'print와 return은 다릅니다. 다른 코드에서 결과를 쓰려면 return이 필요합니다.'},
+    '안전한 입력':{title:'멈출 조건과 오류 처리 나누기',pattern:'try:\n    값 = int(input())\n    if 조건:\n        # 처리\nexcept ValueError:\n    # 안내',note:'try에는 실패할 수 있는 변환을, except에는 사용자가 이해할 안내를 둡니다.',pitfall:'while문에서는 조건을 바꾸는 코드가 없으면 반복이 끝나지 않습니다.'},
+    '표준 라이브러리':{title:'필요한 도구를 가져와 사용하기',pattern:'import 모듈\n결과 = 모듈.기능(값)\n\n# 또는\nfrom 모듈 import 기능',note:'모듈 이름과 기능 이름은 각각 다른 역할입니다.',pitfall:'from으로 기능을 가져온 뒤에는 모듈 이름을 붙이지 않고 바로 호출합니다.'},
+    '클래스':{title:'상태와 행동을 함께 묶기',pattern:'class 클래스이름:\n    def __init__(self, 값):\n        self.속성 = 값\n\n    def 행동(self):\n        return self.속성',note:'self는 지금 만들어진 객체 자신을 가리킵니다.',pitfall:'메서드 첫 번째 매개변수 self와 클래스 안쪽 들여쓰기를 빼먹기 쉽습니다.'},
+    '모듈':{title:'역할을 파일 단위로 나누기',pattern:'# rules.py\ndef 규칙(값):\n    return 결과\n\n# main.py\n# from rules import 규칙',note:'현재 입력창에서는 한 파일씩 연습하지만, 규칙 함수를 분리하는 습관이 다중 파일 프로젝트의 출발점입니다.',pitfall:'다른 파일에서 쓸 규칙은 print보다 return 중심으로 만들면 재사용하기 쉽습니다.'},
   }
   return byUnit[lesson.unit??'']??{title:'문제를 작은 단계로 나누기',pattern:'# 값 준비하기\n# 처리하기\n# 결과 출력하기',note:'문제의 입력·처리·출력을 나누면 코드의 목적이 분명해집니다.',pitfall:'한 번에 완성하려 하기보다 각 단계의 실행 결과를 먼저 확인합니다.'}
 }
@@ -142,7 +152,7 @@ export default function AppStudio(){
 
   const lesson=lessons.find(item=>item.id===selected)??lessons[0]
   const nextLesson=lessons[lessons.findIndex(item=>item.id===lesson.id)+1]
-  const levels=useMemo(()=>Array.from({length:5},(_,index)=>lessons.filter(item=>levelOf(item)===index+1)),[lessons])
+  const levels=useMemo(()=>Array.from({length:9},(_,index)=>lessons.filter(item=>levelOf(item)===index+1)),[lessons])
   const progress=Math.round(done.length/lessons.length*100)
   const next=today?.items.find(item=>!item.completedToday)
   const reviewItems=today?.items.filter(item=>item.itemType==='review'&&!item.completedToday)??[]
