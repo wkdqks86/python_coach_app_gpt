@@ -25,6 +25,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[*LOCAL_ORIGINS, *DEPLOYED_ORIG
 DATA_DIR = Path(__file__).parent / "data"
 DB_PATH = DATA_DIR / "pycoach.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+ADMIN_NICKNAME_KEY = "향유랑".casefold()
 
 LEGACY_LESSONS = [
     {"id":"hello-print","order":1,"title":"화면에 글자 보여주기","concept":"`print()`는 컴퓨터에게 “이 내용을 화면에 보여줘”라고 말하는 명령입니다.","why":"코드를 실행한 결과를 확인할 때 가장 먼저 쓰는 도구예요.","example":'print("안녕하세요")',"exampleOutput":"안녕하세요","prompt":"화면에 “안녕하세요”를 출력해 보세요.","starterCode":"# 여기에 코드를 작성해 보세요\\n","expectedOutput":"안녕하세요","hints":["화면에 내용을 보여줄 때 쓰는 함수를 떠올려 보세요.","글자는 큰따옴표 또는 작은따옴표로 감쌉니다.",'print("안녕하세요")'],"summary":"print()는 값을 화면에 출력합니다.","estimatedMinutes":8},
@@ -56,6 +57,10 @@ class UserRegisterRequest(BaseModel):
 class UserLoginRequest(BaseModel):
     nickname: str
     accessCode: str
+
+
+class AccessCodeResetRequest(BaseModel):
+    nickname: str
 
 
 def normalize_nickname(nickname: str) -> tuple[str, str]:
@@ -275,6 +280,22 @@ def register_user(request: UserRegisterRequest) -> dict[str, str]:
 def login_user(request: UserLoginRequest) -> dict[str, str]:
     user = current_user(request.nickname, request.accessCode)
     return {"nickname": user["nickname"], "accessCode": request.accessCode}
+
+
+@app.post("/api/users/reset-access-code")
+def reset_access_code(request: AccessCodeResetRequest, admin: dict[str, str] = Depends(current_user)) -> dict[str, str]:
+    """Issue a replacement code without changing the user's progress identity."""
+    _, admin_key = normalize_nickname(admin["nickname"])
+    if admin_key != ADMIN_NICKNAME_KEY:
+        raise HTTPException(403, "접속 코드 재발급은 관리자만 할 수 있어요.")
+    _, nickname_key = normalize_nickname(request.nickname)
+    replacement_code = new_access_code()
+    with database() as connection:
+        user = connection.execute("SELECT nickname FROM users WHERE nickname_key = ?", (nickname_key,)).fetchone()
+        if not user:
+            raise HTTPException(404, "해당 닉네임의 사용자를 찾지 못했어요.")
+        connection.execute("UPDATE users SET access_code_hash = ? WHERE nickname_key = ?", (code_hash(replacement_code), nickname_key))
+    return {"nickname": user[0], "accessCode": replacement_code}
 
 
 def completed_ids(user_id: str) -> list[str]:
